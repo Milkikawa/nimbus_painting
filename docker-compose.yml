@@ -1,0 +1,17 @@
+services:
+  nimbus-painting:
+    build: .
+    ports:
+      - "4030:4030"
+    environment:
+      LISTEN_ADDR: "${LISTEN_ADDR:-:4030}"
+      DB_DRIVER: "${DB_DRIVER:-sqlite}"
+      SQLITE_PATH: "${SQLITE_PATH:-/app/config/app.db}"
+      MARIADB_DSN: "${MARIADB_DSN:-}"
+      UPSTREAM_ENDPOINT: "${UPSTREAM_ENDPOINT:-}"
+      IMAGE_DIR: "${IMAGE_DIR:-/app/images}"
+      PUBLIC_BASE_URL: "${PUBLIC_BASE_URL:-}"
+    volumes:
+      - ./config:/app/config
+      - ./images:/app/images
+    restart: unless-stopped
