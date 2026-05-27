@@ -95,6 +95,7 @@ async function logout() {
 
 async function navigate(view, push = true) {
   const nextView = pages[view] ? view : 'overview';
+  pages[state.activeView]?.cleanup?.();
   state.activeView = nextView;
   const page = pages[nextView];
   el.viewTitle.textContent = page.title;

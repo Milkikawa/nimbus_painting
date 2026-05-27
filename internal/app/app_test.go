@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -72,6 +73,8 @@ func TestMonitoringSummaryAuthAndStats(t *testing.T) {
 	now := time.Now().UTC()
 	insertLog(t, application, "log_success", true, now.Add(-2*time.Minute))
 	insertLog(t, application, "log_failed", false, now.Add(-time.Minute))
+	writeImageFile(t, application.cfg.ImageDir, "img_active.png", 2048)
+	writeImageFile(t, application.cfg.ImageDir, "img_deleted.png", 4096)
 	insertImage(t, application, "img_active", now.Add(-2*time.Minute))
 	insertImage(t, application, "img_deleted", now.Add(-time.Minute))
 	if _, err := application.store.MarkImageDeleted(context.Background(), "img_deleted"); err != nil {
@@ -88,6 +91,9 @@ func TestMonitoringSummaryAuthAndStats(t *testing.T) {
 	}
 	if tasks["total"].(float64) != 2 || tasks["success"].(float64) != 1 || tasks["failed"].(float64) != 1 {
 		t.Fatalf("unexpected task stats: %#v", tasks)
+	}
+	if images["storage_bytes"].(float64) != 2048 {
+		t.Fatalf("unexpected image storage bytes: %#v", images)
 	}
 	if successRate["percentage"].(float64) != 50 {
 		t.Fatalf("unexpected success rate: %#v", successRate)
@@ -153,5 +159,16 @@ func insertImage(t *testing.T, application *App, id string, created time.Time) {
 		ID: id, CreatedAt: created, UpstreamImageURL: "https://example.com/image.png", LocalPath: filepath.Join(application.cfg.ImageDir, id+".png"), PublicURL: "/images/" + id + ".png", Filename: id + ".png", ModelIndex: 4, Seed: 1, Width: 832, Height: 1216, Prompt: "prompt",
 	}); err != nil {
 		t.Fatalf("insert image record: %v", err)
+	}
+}
+
+func writeImageFile(t *testing.T, dir, name string, size int) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir image dir: %v", err)
+	}
+	content := bytes.Repeat([]byte{0x61}, size)
+	if err := os.WriteFile(filepath.Join(dir, name), content, 0o644); err != nil {
+		t.Fatalf("write image file: %v", err)
 	}
 }
