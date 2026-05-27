@@ -27,7 +27,7 @@ type Response struct {
 	Message string `json:"message"`
 	Data    struct {
 		ImageURL        string `json:"image_url"`
-		ImageID         string `json:"image_id"`
+		ImageID         any    `json:"image_id"`
 		ModelName       string `json:"model_name"`
 		PointsUsed      int    `json:"points_used"`
 		RemainingPoints int    `json:"remaining_points"`

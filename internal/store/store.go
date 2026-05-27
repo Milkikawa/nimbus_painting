@@ -199,7 +199,7 @@ func (s *Store) ListPromptGroups(ctx context.Context) ([]model.PromptGroup, erro
 		return nil, err
 	}
 	defer rows.Close()
-	var groups []model.PromptGroup
+	groups := make([]model.PromptGroup, 0)
 	for rows.Next() {
 		var g model.PromptGroup
 		var created, updated string
@@ -255,7 +255,7 @@ func (s *Store) ListRequestLogs(ctx context.Context, limit int) ([]model.Request
 		return nil, err
 	}
 	defer rows.Close()
-	var logs []model.RequestLog
+	logs := make([]model.RequestLog, 0)
 	for rows.Next() {
 		var item model.RequestLog
 		var created string
@@ -281,7 +281,7 @@ func (s *Store) ListImages(ctx context.Context, limit int) ([]model.ImageRecord,
 		return nil, err
 	}
 	defer rows.Close()
-	var images []model.ImageRecord
+	images := make([]model.ImageRecord, 0)
 	for rows.Next() {
 		var image model.ImageRecord
 		var created string
