@@ -67,7 +67,7 @@ func secureHeaders(next http.Handler) http.Handler {
 func (a *App) health(w http.ResponseWriter, r *http.Request) {
 	settings, _ := a.store.GetSettings(r.Context())
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status": "ok", "version": "0.1.0", "database": a.store.Driver(),
+		"status": "ok", "version": "0.2.0", "database": a.store.Driver(),
 		"upstream_configured": settings["upstream_endpoint"] != "",
 		"uptime_seconds":      int(time.Since(a.start).Seconds()),
 	})
@@ -305,7 +305,7 @@ func (a *App) adminStatus(w http.ResponseWriter, r *http.Request) {
 		"initialized":         hash != "",
 		"authenticated":       authenticated,
 		"upstream_configured": settings["upstream_endpoint"] != "",
-		"version_or_name":     "Nimbus Painting Proxy 0.1.0",
+		"version_or_name":     "Nimbus Painting Proxy 0.2.0",
 		"uptime_seconds":      int(time.Since(a.start).Seconds()),
 	})
 }
