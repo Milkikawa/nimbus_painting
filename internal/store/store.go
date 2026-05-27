@@ -23,6 +23,20 @@ type Store struct {
 	cfg    config.Config
 }
 
+type ImageStats struct {
+	Total       int        `json:"total"`
+	Active      int        `json:"active"`
+	Deleted     int        `json:"deleted"`
+	LatestImage *time.Time `json:"latest_image"`
+}
+
+type TaskStats struct {
+	Total         int        `json:"total"`
+	Success       int        `json:"success"`
+	Failed        int        `json:"failed"`
+	LatestRequest *time.Time `json:"latest_request"`
+}
+
 func Open(cfg config.Config) (*Store, error) {
 	driver := strings.ToLower(cfg.DBDriver)
 	switch driver {
@@ -292,6 +306,34 @@ func (s *Store) ListImages(ctx context.Context, limit int) ([]model.ImageRecord,
 		images = append(images, image)
 	}
 	return images, rows.Err()
+}
+
+func (s *Store) ImageStats(ctx context.Context) (ImageStats, error) {
+	var stats ImageStats
+	var latest string
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(CASE WHEN deleted_at='' THEN 1 ELSE 0 END), 0), COALESCE(SUM(CASE WHEN deleted_at<>'' THEN 1 ELSE 0 END), 0), COALESCE(MAX(created_at), '') FROM image_records`).Scan(&stats.Total, &stats.Active, &stats.Deleted, &latest)
+	if err != nil {
+		return stats, err
+	}
+	if latest != "" {
+		parsed := parseTime(latest)
+		stats.LatestImage = &parsed
+	}
+	return stats, nil
+}
+
+func (s *Store) TaskStats(ctx context.Context) (TaskStats, error) {
+	var stats TaskStats
+	var latest string
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(CASE WHEN success<>0 THEN 1 ELSE 0 END), 0), COALESCE(SUM(CASE WHEN success=0 THEN 1 ELSE 0 END), 0), COALESCE(MAX(created_at), '') FROM request_logs`).Scan(&stats.Total, &stats.Success, &stats.Failed, &latest)
+	if err != nil {
+		return stats, err
+	}
+	if latest != "" {
+		parsed := parseTime(latest)
+		stats.LatestRequest = &parsed
+	}
+	return stats, nil
 }
 
 func (s *Store) MarkImageDeleted(ctx context.Context, id string) (string, error) {

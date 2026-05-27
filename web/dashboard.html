@@ -1,80 +1,67 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Nimbus Painting Proxy</title>
-  <style>
-    body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;margin:0;background:#f6f7fb;color:#1f2937}header{background:#111827;color:#fff;padding:18px 28px}main{padding:24px;display:grid;gap:20px}.card{background:#fff;border-radius:14px;padding:18px;box-shadow:0 8px 24px #0001}input,textarea,select,button{font:inherit;padding:9px;border:1px solid #d1d5db;border-radius:8px}input,textarea,select{width:100%;box-sizing:border-box}button{background:#2563eb;color:#fff;border:0;cursor:pointer}button.danger{background:#dc2626}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}.row{display:grid;gap:6px}table{width:100%;border-collapse:collapse;font-size:14px}td,th{border-bottom:1px solid #e5e7eb;padding:8px;text-align:left;vertical-align:top}.images{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px}.image-card img{width:100%;border-radius:10px;background:#eee}.muted{color:#6b7280;font-size:13px}.hidden{display:none}pre{white-space:pre-wrap;background:#f3f4f6;padding:10px;border-radius:8px;max-height:260px;overflow:auto}
-  </style>
+  <link rel="stylesheet" href="/assets/app.css">
 </head>
 <body>
-<header><h1>Nimbus Painting Proxy</h1><div class="muted">OpenAI-compatible image forwarding layer</div></header>
-<main>
-  <section class="card" id="authCard">
-    <h2>登录 / 初始化</h2>
-    <p class="muted">首次使用请输入至少 8 位密码点击初始化；之后使用同一个密码登录。</p>
-    <div class="grid"><input id="password" type="password" placeholder="管理员密码"><button onclick="init()">初始化</button><button onclick="login()">登录</button><button onclick="logout()" class="danger">退出</button></div>
-    <p id="authMsg" class="muted"></p>
-  </section>
+  <div id="toast" class="toast hidden" role="status"></div>
 
-  <section class="card">
-    <h2>基础设置</h2>
-    <div class="grid">
-      <label class="row">上游完整 Endpoint<input id="upstream_endpoint"></label>
-      <label class="row">默认模型编号<input id="default_model_index" value="4"></label>
-      <label class="row">默认宽度<input id="default_width" value="832"></label>
-      <label class="row">默认高度<input id="default_height" value="1216"></label>
-      <label class="row">Steps<input id="default_steps" value="20"></label>
-      <label class="row">CFG<input id="default_cfg" value="7"></label>
-      <label class="row">最小尺寸<input id="min_dimension" value="64"></label>
-      <label class="row">最大尺寸<input id="max_dimension" value="2048"></label>
-      <label class="row">请求超时秒<input id="request_timeout_seconds" value="120"></label>
-      <label class="row">图片保存目录<input id="image_save_dir" value="images"></label>
-      <label class="row">正面提示词组<select id="selected_positive_group_id"></select></label>
-      <label class="row">负面提示词组<select id="selected_negative_group_id"></select></label>
-    </div>
-    <p><button onclick="saveSettings()">保存设置</button></p>
-  </section>
+  <main id="authView" class="auth-shell hidden">
+    <section class="auth-card">
+      <div class="brand-mark">NP</div>
+      <p class="eyebrow">Nimbus Painting Proxy</p>
+      <h1 id="authTitle">登录</h1>
+      <p id="authHint" class="muted">请输入管理员密码进入后台。</p>
+      <label class="field">
+        <span>管理员密码</span>
+        <input id="password" type="password" autocomplete="current-password" placeholder="至少 8 位密码">
+      </label>
+      <div class="auth-actions">
+        <button id="initButton" class="hidden">初始化</button>
+        <button id="loginButton">登录</button>
+      </div>
+      <p id="authMsg" class="message"></p>
+    </section>
+  </main>
 
-  <section class="card">
-    <h2>提示词组</h2>
-    <div class="grid">
-      <input id="group_id" type="hidden"><input id="group_name" placeholder="组名"><select id="group_type"><option value="positive">正面</option><option value="negative">负面</option></select><input id="group_remark" placeholder="备注">
-    </div>
-    <p><textarea id="group_content" rows="3" placeholder="tag1, tag2, tag3"></textarea></p>
-    <p><button onclick="saveGroup()">保存提示词组</button></p>
-    <table><thead><tr><th>名称</th><th>类型</th><th>内容</th><th>操作</th></tr></thead><tbody id="groups"></tbody></table>
-  </section>
+  <main id="appView" class="app-shell hidden">
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <div class="brand-mark">NP</div>
+        <div>
+          <strong>Nimbus Painting</strong>
+          <span>Admin Console</span>
+        </div>
+      </div>
+      <nav class="nav-list" aria-label="主导航">
+        <button data-view="overview">概览</button>
+        <button data-view="monitoring">项目监测</button>
+        <button data-view="settings">基础设置</button>
+        <button data-view="prompts">提示词组</button>
+        <button data-view="images">图片管理</button>
+        <button data-view="logs">请求日志</button>
+      </nav>
+    </aside>
 
-  <section class="card">
-    <h2>图片管理</h2>
-    <div class="images" id="images"></div>
-  </section>
+    <section class="workspace">
+      <header class="topbar">
+        <div>
+          <p id="viewEyebrow" class="eyebrow">Dashboard</p>
+          <h1 id="viewTitle">概览</h1>
+        </div>
+        <div class="topbar-actions">
+          <span id="serviceStatus" class="status-pill">检查中</span>
+          <button id="logoutButton" class="button-secondary">退出</button>
+        </div>
+      </header>
+      <section id="pageAlert" class="alert hidden"></section>
+      <section id="pageRoot" class="content-grid"></section>
+    </section>
+  </main>
 
-  <section class="card">
-    <h2>请求日志</h2>
-    <div id="logs"></div>
-  </section>
-</main>
-<script>
-async function api(url, opts={}){const res=await fetch(url,{headers:{'Content-Type':'application/json'},...opts}); const text=await res.text(); let data={}; try{data=JSON.parse(text)}catch{} if(!res.ok) throw new Error(data.error?.message||text||res.status); return data}
-async function init(){try{await api('/admin/init',{method:'POST',body:JSON.stringify({password:password.value})}); authMsg.textContent='初始化成功，请登录'}catch(e){authMsg.textContent=e.message}}
-async function login(){try{await api('/admin/login',{method:'POST',body:JSON.stringify({password:password.value})}); authMsg.textContent='登录成功'; await loadAll()}catch(e){authMsg.textContent=e.message}}
-async function logout(){await api('/admin/logout',{method:'POST'}); authMsg.textContent='已退出'}
-async function loadAll(){await Promise.all([loadSettings(),loadGroups(),loadImages(),loadLogs()])}
-async function loadSettings(){const s=await api('/admin/api/settings'); for(const [k,v] of Object.entries(s)){const el=document.getElementById(k); if(el) el.value=v}}
-async function saveSettings(){const ids=['upstream_endpoint','default_model_index','default_width','default_height','default_steps','default_cfg','min_dimension','max_dimension','request_timeout_seconds','image_save_dir','selected_positive_group_id','selected_negative_group_id']; const body={}; ids.forEach(id=>body[id]=document.getElementById(id).value); await api('/admin/api/settings',{method:'PUT',body:JSON.stringify(body)}); alert('已保存')}
-async function loadGroups(){const list=asList(await api('/admin/api/prompt-groups')); groups.innerHTML=''; selected_positive_group_id.innerHTML='<option value="">不使用</option>'; selected_negative_group_id.innerHTML='<option value="">不使用</option>'; list.forEach(g=>{const opt=new Option(g.name,g.id); (g.type==='positive'?selected_positive_group_id:selected_negative_group_id).add(opt); groups.insertAdjacentHTML('beforeend',`<tr><td>${esc(g.name)}</td><td>${g.type}</td><td>${esc(g.content)}</td><td><button onclick='editGroup(${JSON.stringify(g)})'>编辑</button> <button class="danger" onclick="deleteGroup('${g.id}')">删除</button></td></tr>`)}); await loadSettings()}
-function editGroup(g){group_id.value=g.id; group_name.value=g.name; group_type.value=g.type; group_remark.value=g.remark; group_content.value=g.content}
-async function saveGroup(){await api('/admin/api/prompt-groups',{method:'POST',body:JSON.stringify({id:group_id.value,name:group_name.value,type:group_type.value,remark:group_remark.value,content:group_content.value})}); group_id.value=''; await loadGroups()}
-async function deleteGroup(id){if(confirm('确认删除提示词组？')){await api('/admin/api/prompt-groups/'+id,{method:'DELETE'}); await loadGroups()}}
-async function loadImages(){const list=asList(await api('/admin/api/images')); images.innerHTML=list.map(i=>`<div class="image-card"><a href="${i.public_url}" target="_blank"><img src="${i.public_url}"></a><div class="muted">sd${i.model_index} seed${i.seed}</div><button class="danger" onclick="deleteImage('${i.id}')">删除</button></div>`).join('')}
-async function deleteImage(id){if(confirm('确认删除图片文件和记录？')){await api('/admin/api/images/'+id,{method:'DELETE'}); await loadImages()}}
-async function loadLogs(){const list=asList(await api('/admin/api/logs')); logs.innerHTML='<table><tr><th>时间</th><th>结果</th><th>模型</th><th>Seed</th><th>Prompt</th><th>错误</th></tr>'+list.map(l=>`<tr><td>${l.CreatedAt||l.created_at||''}</td><td>${l.Success??l.success}</td><td>sd${l.ModelIndex??l.model_index}</td><td>${l.Seed??l.seed}</td><td>${esc(l.FinalPrompt??l.final_prompt??'')}</td><td>${esc(l.ErrorMessage??l.error_message??'')}</td></tr>`).join('')+'</table>'}
-function asList(value){return Array.isArray(value)?value:[]}
-function esc(s){return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
-loadAll().catch(e=>authMsg.textContent='请先登录或初始化：'+e.message)
-</script>
+  <script type="module" src="/assets/app.js"></script>
 </body>
 </html>

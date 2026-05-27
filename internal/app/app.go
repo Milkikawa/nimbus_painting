@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -38,11 +39,14 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("GET /v1/models", a.models)
 	mux.HandleFunc("POST /v1/chat/completions", a.chatCompletions)
 	mux.HandleFunc("GET /dashboard", a.dashboard)
+	mux.Handle("GET /assets/", http.StripPrefix("/assets/", http.FileServer(http.Dir(filepath.Join("web", "assets")))))
 	mux.HandleFunc("POST /admin/init", a.adminInit)
 	mux.HandleFunc("POST /admin/login", a.adminLogin)
 	mux.HandleFunc("POST /admin/logout", a.adminLogout)
+	mux.HandleFunc("GET /admin/api/status", a.adminStatus)
 	mux.HandleFunc("GET /admin/api/settings", a.requireAdmin(a.getSettings))
 	mux.HandleFunc("PUT /admin/api/settings", a.requireAdmin(a.updateSettings))
+	mux.HandleFunc("GET /admin/api/monitoring/summary", a.requireAdmin(a.monitoringSummary))
 	mux.HandleFunc("GET /admin/api/prompt-groups", a.requireAdmin(a.listPromptGroups))
 	mux.HandleFunc("POST /admin/api/prompt-groups", a.requireAdmin(a.savePromptGroup))
 	mux.HandleFunc("DELETE /admin/api/prompt-groups/", a.requireAdmin(a.deletePromptGroup))
@@ -290,6 +294,22 @@ func (a *App) dashboard(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, filepath.Join("web", "dashboard.html"))
 }
 
+func (a *App) adminStatus(w http.ResponseWriter, r *http.Request) {
+	hash, _ := a.store.GetSetting(r.Context(), "dashboard_password_hash")
+	settings, _ := a.store.GetSettings(r.Context())
+	authenticated := false
+	if cookie, err := r.Cookie("np_session"); err == nil {
+		authenticated, _ = a.store.ValidSession(r.Context(), cookie.Value)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"initialized":         hash != "",
+		"authenticated":       authenticated,
+		"upstream_configured": settings["upstream_endpoint"] != "",
+		"version_or_name":     "Nimbus Painting Proxy 0.1.0",
+		"uptime_seconds":      int(time.Since(a.start).Seconds()),
+	})
+}
+
 func (a *App) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		cookie, err := r.Cookie("np_session")
@@ -420,6 +440,55 @@ func (a *App) listImages(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, images)
 }
+
+func (a *App) monitoringSummary(w http.ResponseWriter, r *http.Request) {
+	var memory runtime.MemStats
+	runtime.ReadMemStats(&memory)
+
+	imageStats, err := a.store.ImageStats(r.Context())
+	if err != nil {
+		openAIError(w, 500, err.Error(), "server_error", "image_stats_failed")
+		return
+	}
+	taskStats, err := a.store.TaskStats(r.Context())
+	if err != nil {
+		openAIError(w, 500, err.Error(), "server_error", "task_stats_failed")
+		return
+	}
+
+	// 监测面板只做当前快照：不启动后台采样，不写入数据库，避免额外资源开销。
+	successRate := 0.0
+	if taskStats.Total > 0 {
+		successRate = float64(taskStats.Success) / float64(taskStats.Total)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"process": map[string]any{
+			"uptime_seconds":     int(time.Since(a.start).Seconds()),
+			"goroutines":         runtime.NumGoroutine(),
+			"memory_alloc_bytes": memory.Alloc,
+			"memory_total_bytes": memory.TotalAlloc,
+			"gc_count":           memory.NumGC,
+		},
+		"images": map[string]any{
+			"total":         imageStats.Total,
+			"active":        imageStats.Active,
+			"deleted":       imageStats.Deleted,
+			"latest_image":  imageStats.LatestImage,
+			"storage_bytes": nil,
+		},
+		"tasks": map[string]any{
+			"total":          taskStats.Total,
+			"success":        taskStats.Success,
+			"failed":         taskStats.Failed,
+			"latest_request": taskStats.LatestRequest,
+		},
+		"success_rate": map[string]any{
+			"value":      successRate,
+			"percentage": successRate * 100,
+		},
+	})
+}
+
 func (a *App) deleteImage(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimPrefix(r.URL.Path, "/admin/api/images/")
 	path, err := a.store.MarkImageDeleted(r.Context(), id)
