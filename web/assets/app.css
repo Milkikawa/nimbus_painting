@@ -248,6 +248,30 @@ a { color: var(--primary); text-decoration: none; }
 table { width: 100%; border-collapse: collapse; min-width: 760px; }
 th, td { padding: 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; font-size: 14px; }
 th { background: var(--panel-soft); color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+.nowrap { white-space: nowrap; }
+
+.logs-table table { min-width: 1120px; table-layout: fixed; }
+.logs-table th:nth-child(1), .logs-table td:nth-child(1) { width: 150px; }
+.logs-table th:nth-child(2), .logs-table td:nth-child(2) { width: 82px; }
+.logs-table th:nth-child(3), .logs-table td:nth-child(3) { width: 72px; }
+.logs-table th:nth-child(4), .logs-table td:nth-child(4) { width: 130px; }
+.logs-table th:nth-child(8), .logs-table td:nth-child(8) { width: 180px; }
+
+.log-text {
+  max-height: 96px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.55;
+}
+
+.error-text { color: var(--danger); }
+.log-cards { display: none; gap: 14px; }
+.log-card { border: 1px solid var(--line); border-radius: 18px; background: var(--panel-solid); padding: 16px; box-shadow: var(--shadow-soft); }
+.log-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.log-card-head span { display: block; margin-top: 4px; }
+.log-block { display: grid; gap: 6px; margin-top: 12px; }
+.log-block > span { color: var(--muted); font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
 
 .images { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 18px; }
 .image-card { border: 1px solid var(--line); border-radius: 18px; background: var(--panel-solid); overflow: hidden; box-shadow: var(--shadow-soft); }
@@ -287,4 +311,7 @@ th { background: var(--panel-soft); color: var(--muted); font-size: 12px; text-t
   .card-header button, .topbar-actions button, .status-pill { width: 100%; justify-content: center; }
   .metric-grid, .grid, .images { grid-template-columns: 1fr; }
   .metric strong { font-size: 23px; }
+  .logs-table { display: none; }
+  .log-cards { display: grid; }
+  .log-card-head { flex-direction: column; }
 }
