@@ -11,6 +11,7 @@ const state = { status: null, activeView: 'overview' };
 const el = {
   authView: document.getElementById('authView'), appView: document.getElementById('appView'), password: document.getElementById('password'),
   initButton: document.getElementById('initButton'), loginButton: document.getElementById('loginButton'), logoutButton: document.getElementById('logoutButton'),
+  themeButton: document.getElementById('themeButton'),
   authTitle: document.getElementById('authTitle'), authHint: document.getElementById('authHint'), authMsg: document.getElementById('authMsg'),
   root: document.getElementById('pageRoot'), alert: document.getElementById('pageAlert'), toast: document.getElementById('toast'),
   viewTitle: document.getElementById('viewTitle'), viewEyebrow: document.getElementById('viewEyebrow'), serviceStatus: document.getElementById('serviceStatus')
@@ -21,11 +22,14 @@ const ctx = { root: el.root, toast, navigate, refreshStatus };
 el.initButton.addEventListener('click', initAdmin);
 el.loginButton.addEventListener('click', login);
 el.logoutButton.addEventListener('click', logout);
+el.themeButton.addEventListener('click', toggleTheme);
 el.password.addEventListener('keydown', (event) => { if (event.key === 'Enter') state.status?.initialized ? login() : initAdmin(); });
 document.querySelectorAll('[data-view]').forEach((button) => button.addEventListener('click', () => navigate(button.dataset.view)));
 window.addEventListener('popstate', () => navigate(readView(), false));
 
 boot();
+
+applyTheme(localStorage.getItem('np_theme') || 'light');
 
 async function boot() {
   await refreshStatus();
@@ -140,4 +144,15 @@ function toast(message, type = '') {
   el.toast.className = `toast ${type}`.trim();
   window.clearTimeout(toast.timer);
   toast.timer = window.setTimeout(() => el.toast.classList.add('hidden'), 2600);
+}
+
+function toggleTheme() {
+  const nextTheme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  applyTheme(nextTheme);
+  localStorage.setItem('np_theme', nextTheme);
+}
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  el.themeButton.textContent = theme === 'dark' ? '日间模式' : '夜间模式';
 }
