@@ -3,7 +3,7 @@ import { api, fmtDate, percent } from '../api.js';
 
 export const overviewPage = {
   title: '概览',
-  eyebrow: 'Overview',
+  eyebrow: '总览',
   async render(ctx) {
     ctx.root.innerHTML = `
       <section class="card">
@@ -16,7 +16,7 @@ export const overviewPage = {
     document.getElementById('openMonitoring').addEventListener('click', () => ctx.navigate('monitoring'));
     const [monitoring, settings] = await Promise.all([api('/admin/api/monitoring/summary'), settingsSummary()]);
     document.getElementById('overviewRoot').innerHTML = `
-      <div class="metric"><span>上游 Endpoint</span><strong>${settings.endpoint}</strong></div>
+      <div class="metric"><span>上游接口</span><strong>${settings.endpoint}</strong></div>
       <div class="metric"><span>默认模型</span><strong>${settings.model}</strong></div>
       <div class="metric"><span>默认尺寸</span><strong>${settings.size}</strong></div>
       <div class="metric"><span>任务总数</span><strong>${monitoring.tasks?.total ?? 0}</strong></div>

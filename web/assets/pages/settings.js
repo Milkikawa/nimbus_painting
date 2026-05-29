@@ -4,17 +4,17 @@ const settingIds = ['upstream_endpoint','default_model_index','default_width','d
 
 export const settingsPage = {
   title: '基础设置',
-  eyebrow: 'Configuration',
+  eyebrow: '配置',
   async render(ctx) {
     ctx.root.innerHTML = `
       <section class="card">
-        <div class="card-header"><div><h2>基础参数</h2><p class="muted">配置上游 endpoint、默认生成参数和图片保存目录。</p></div><button id="saveSettings">保存设置</button></div>
+        <div class="card-header"><div><h2>基础参数</h2><p class="muted">配置上游接口、默认生成参数和图片保存目录。</p></div><button id="saveSettings">保存设置</button></div>
         <div class="grid">
-          <label class="field"><span>上游完整 Endpoint</span><input id="upstream_endpoint" placeholder="https://example.com/full/path"></label>
+          <label class="field"><span>上游完整接口</span><input id="upstream_endpoint" placeholder="https://example.com/full/path"></label>
           <label class="field"><span>默认模型编号</span><input id="default_model_index" inputmode="numeric"></label>
           <label class="field"><span>默认宽度</span><input id="default_width" inputmode="numeric"></label>
           <label class="field"><span>默认高度</span><input id="default_height" inputmode="numeric"></label>
-          <label class="field"><span>Steps</span><input id="default_steps" inputmode="numeric"></label>
+          <label class="field"><span>采样步数</span><input id="default_steps" inputmode="numeric"></label>
           <label class="field"><span>CFG</span><input id="default_cfg" inputmode="decimal"></label>
           <label class="field"><span>最小尺寸</span><input id="min_dimension" inputmode="numeric"></label>
           <label class="field"><span>最大尺寸</span><input id="max_dimension" inputmode="numeric"></label>

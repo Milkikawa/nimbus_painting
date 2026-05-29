@@ -2,12 +2,12 @@
 
 export const imagesPage = {
   title: '图片管理',
-  eyebrow: 'Images',
+  eyebrow: '本地图库',
   async render(ctx) {
     ctx.root.innerHTML = `
       <section class="card">
         <div class="card-header">
-          <div><h2>图片管理</h2><p class="muted">查看最近 100 张未删除图片，支持预览和单图删除。</p></div>
+          <div><h2>图片管理</h2><p class="muted">查看最近 100 张本地归档图片，同时保留上游原图链接和模型信息。</p></div>
           <button id="reloadImages" class="button-secondary">刷新</button>
         </div>
         <div id="imagesRoot"></div>
@@ -29,8 +29,11 @@ async function loadImages(ctx) {
       <a href="${escapeHTML(image.public_url)}" target="_blank" rel="noreferrer"><img src="${escapeHTML(image.public_url)}" alt="生成图片预览"></a>
       <div class="image-card-body">
         <strong>sd${escapeHTML(image.model_index)} · seed ${escapeHTML(image.seed)}</strong>
+        <span class="muted">上游模型：${escapeHTML(image.upstream_model_name || '—')}</span>
         <span class="muted">${escapeHTML(image.width)} × ${escapeHTML(image.height)}</span>
         <span class="muted">${fmtDate(image.created_at)}</span>
+        <a href="${escapeHTML(image.upstream_image_url)}" target="_blank" rel="noreferrer">打开上游原图</a>
+        <a href="${escapeHTML(image.public_url)}" target="_blank" rel="noreferrer">打开本地归档</a>
         <button class="button-danger" data-delete="${escapeHTML(image.id)}">删除图片</button>
       </div>
     </article>`).join('')}</div>`;

@@ -1,10 +1,10 @@
-import { api, fmtBytes, fmtDate, percent } from '../api.js';
+﻿import { api, fmtBytes, fmtDate, percent } from '../api.js';
 
 let uptimeTimer = null;
 
 export const monitoringPage = {
   title: '项目监测',
-  eyebrow: 'Monitoring',
+  eyebrow: '运行监测',
   cleanup() {
     if (uptimeTimer) {
       window.clearInterval(uptimeTimer);
