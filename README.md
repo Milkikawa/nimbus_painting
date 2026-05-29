@@ -158,7 +158,7 @@ images/
 | `MARIADB_DSN` | 空 | MariaDB 连接字符串 |
 | `UPSTREAM_ENDPOINT` | 空 | 上游完整生图 endpoint，可留空后在 WebUI 配置 |
 | `IMAGE_DIR` | `/app/images` | Docker 中图片保存目录 |
-| `PUBLIC_BASE_URL` | 空 | 返回图片 URL 时使用的外部访问前缀 |
+| `PUBLIC_BASE_URL` | 空 | 本地归档图片 URL 的外部访问前缀；不影响默认下游返回的上游原图链接 |
 | `SESSION_TTL_HOURS` | `24` | WebUI 登录有效期 |
 | `DEFAULT_TIMEOUT_SECONDS` | `120` | 默认上游请求超时 |
 
@@ -204,15 +204,17 @@ sd4, 1girl, cat ears, --steps 28, --cfg 7.5
 
 ## 返回图片
 
-当前返回给下游的是 Markdown 图片格式：
+当前返回给下游的是 Markdown 图片格式，图片地址默认使用上游原始 `image_url`：
 
 ```text
-![generated image](图片URL)
+![generated image](上游图片URL)
 
-Image URL: 图片URL
+Image URL: 上游图片URL
 Seed: 8848
 Model: sd4
 ```
+
+生成成功后，本项目仍会尝试把图片下载到本地归档，供 WebUI 图片管理页面查看。但本地归档地址不会再覆盖下游返回地址，避免 NewAPI、Koishi、NapCat、QQ 客户端等外部用户收到 `/images/...` 这种只能在本服务内访问的相对路径。
 
 如果后续发现某些插件不解析 Markdown，可以再调整成纯文本或其他格式。
 
@@ -241,6 +243,22 @@ images/YYYY-MM-DD/YYYY-MM-DD_HH-mm_sd4_seed8848_ab12cd.jpg
 - 模型编号
 - seed
 - 随机字符，避免并发冲突
+
+WebUI 会同时记录上游原图链接、本地归档链接、上游图片 ID、上游模型名称和实际返回给下游的图片链接。`PUBLIC_BASE_URL` 只用于把本地归档链接从 `/images/...` 拼成外部绝对地址；如果没有可公开访问的本项目地址，可以保持为空。
+
+---
+
+## 请求日志
+
+管理后台的“请求日志”会记录每次生图的关键上下文：
+
+- 用户原始输入、最终正面提示词和负面提示词
+- 实际发送给上游的完整参数，包括缺省后的尺寸、steps、cfg、seed 和模型编号
+- 上游 HTTP 状态码、原始响应体、`image_url`、`image_id`、`model_name`
+- 上游返回的 `points_used` 和 `remaining_points`
+- 实际返回给下游的图片 URL、图片返回模式、本地保存错误
+
+点数信息只在单条日志中展示，不纳入全局统计。因为不同上游地址和不同 API Key 的余额口径可能不同，混入总览会产生误导。
 
 ---
 

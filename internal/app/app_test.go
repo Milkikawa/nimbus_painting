@@ -114,7 +114,71 @@ func TestMonitoringSummaryEmptyStats(t *testing.T) {
 	}
 }
 
-func requestJSON(t *testing.T, handler http.Handler, method, path string, body any, want int, out any, cookies []*http.Cookie) []*http.Cookie {
+func TestChatCompletionReturnsUpstreamImageURLAndLogsMetadata(t *testing.T) {
+	application, handler := newTestApp(t)
+	var imageURL string
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/generate":
+			if r.Header.Get("Authorization") != "Bearer test-key" {
+				t.Fatalf("authorization not forwarded: %q", r.Header.Get("Authorization"))
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"success": true,
+				"message": "图像生成成功",
+				"data": map[string]any{
+					"image_url":        imageURL,
+					"image_id":         "up-img-1",
+					"model_name":       "上游模型名",
+					"points_used":      1,
+					"remaining_points": 99,
+				},
+			})
+		case "/image.png":
+			w.Header().Set("Content-Type", "image/png")
+			_, _ = w.Write([]byte("png"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstreamServer.Close()
+	imageURL = upstreamServer.URL + "/image.png"
+	if err := application.store.SetSetting(context.Background(), "upstream_endpoint", upstreamServer.URL+"/generate"); err != nil {
+		t.Fatalf("set upstream endpoint: %v", err)
+	}
+
+	var response map[string]any
+	requestJSON(t, handler, http.MethodPost, "/v1/chat/completions", map[string]any{
+		"model":    "sd-generate",
+		"messages": []map[string]any{{"role": "user", "content": "sd4 1girl,solo,nahida,dress"}},
+	}, http.StatusOK, &response, nil, map[string]string{"Authorization": "Bearer test-key"})
+	choices := response["choices"].([]any)
+	message := choices[0].(map[string]any)["message"].(map[string]any)
+	content := message["content"].(string)
+	if !strings.Contains(content, imageURL) {
+		t.Fatalf("response should contain upstream image url: %s", content)
+	}
+	if strings.Contains(content, "/images/") {
+		t.Fatalf("response should not expose local image url: %s", content)
+	}
+
+	logs, err := application.store.ListRequestLogs(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("list request logs: %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("unexpected logs count: %d", len(logs))
+	}
+	log := logs[0]
+	if log.DownstreamImageURL != imageURL || log.UpstreamImageURL != imageURL || log.UpstreamImageID != "up-img-1" || log.UpstreamModelName != "上游模型名" {
+		t.Fatalf("unexpected logged metadata: %#v", log)
+	}
+	if log.ImageRecordID == "" || log.ImageReturnMode != "upstream_url" || !strings.Contains(log.UpstreamResponseBody, "图像生成成功") {
+		t.Fatalf("missing log detail fields: %#v", log)
+	}
+}
+
+func requestJSON(t *testing.T, handler http.Handler, method, path string, body any, want int, out any, cookies []*http.Cookie, extraHeaders ...map[string]string) []*http.Cookie {
 	t.Helper()
 	var payload []byte
 	if body != nil {
@@ -130,6 +194,11 @@ func requestJSON(t *testing.T, handler http.Handler, method, path string, body a
 	}
 	for _, cookie := range cookies {
 		req.AddCookie(cookie)
+	}
+	for _, headers := range extraHeaders {
+		for key, value := range headers {
+			req.Header.Set(key, value)
+		}
 	}
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
