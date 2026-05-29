@@ -24,10 +24,11 @@ type Store struct {
 }
 
 type ImageStats struct {
-	Total       int        `json:"total"`
-	Active      int        `json:"active"`
-	Deleted     int        `json:"deleted"`
-	LatestImage *time.Time `json:"latest_image"`
+	Total        int        `json:"total"`
+	Active       int        `json:"active"`
+	Deleted      int        `json:"deleted"`
+	StorageBytes int64      `json:"storage_bytes"`
+	LatestImage  *time.Time `json:"latest_image"`
 }
 
 type TaskStats struct {
@@ -313,6 +314,25 @@ func (s *Store) ImageStats(ctx context.Context) (ImageStats, error) {
 	var latest string
 	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(CASE WHEN deleted_at='' THEN 1 ELSE 0 END), 0), COALESCE(SUM(CASE WHEN deleted_at<>'' THEN 1 ELSE 0 END), 0), COALESCE(MAX(created_at), '') FROM image_records`).Scan(&stats.Total, &stats.Active, &stats.Deleted, &latest)
 	if err != nil {
+		return stats, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT local_path FROM image_records WHERE deleted_at=''`)
+	if err != nil {
+		return stats, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var path string
+		if err := rows.Scan(&path); err != nil {
+			return stats, err
+		}
+		info, err := os.Stat(path)
+		if err != nil || info.IsDir() {
+			continue
+		}
+		stats.StorageBytes += info.Size()
+	}
+	if err := rows.Err(); err != nil {
 		return stats, err
 	}
 	if latest != "" {

@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -24,9 +25,10 @@ import (
 )
 
 type App struct {
-	cfg   config.Config
-	store *store.Store
-	start time.Time
+	cfg            config.Config
+	store          *store.Store
+	start          time.Time
+	activeRequests atomic.Int64
 }
 
 func New(cfg config.Config, db *store.Store) *App {
@@ -142,6 +144,8 @@ func (a *App) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	positive, negative := a.selectedPrompts(r.Context(), settings)
 	finalPrompt := parser.AppendPositive(parsed.Prompt, positive)
 	reqLog := model.RequestLog{ID: store.NewID("req"), CreatedAt: time.Now(), Model: req.Model, ModelIndex: parsed.ModelIndex, RawPrompt: content, FinalPrompt: finalPrompt, NegativePrompt: negative, Width: parsed.Width, Height: parsed.Height, Steps: parsed.Steps, CFG: parsed.CFG, Seed: parsed.Seed}
+	a.activeRequests.Add(1)
+	defer a.activeRequests.Add(-1)
 
 	upReq := upstream.Request{Prompt: finalPrompt, NegativePrompt: negative, Width: parsed.Width, Height: parsed.Height, Steps: parsed.Steps, CFG: parsed.CFG, ModelIndex: parsed.ModelIndex, Seed: parsed.Seed}
 	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(settings.RequestTimeout)*time.Second)
@@ -468,18 +472,20 @@ func (a *App) monitoringSummary(w http.ResponseWriter, r *http.Request) {
 			"memory_alloc_bytes": memory.Alloc,
 			"memory_total_bytes": memory.TotalAlloc,
 			"gc_count":           memory.NumGC,
+			"memory_sys_bytes":   memory.Sys,
 		},
 		"images": map[string]any{
 			"total":         imageStats.Total,
 			"active":        imageStats.Active,
 			"deleted":       imageStats.Deleted,
 			"latest_image":  imageStats.LatestImage,
-			"storage_bytes": nil,
+			"storage_bytes": imageStats.StorageBytes,
 		},
 		"tasks": map[string]any{
 			"total":          taskStats.Total,
 			"success":        taskStats.Success,
 			"failed":         taskStats.Failed,
+			"running":        a.activeRequests.Load(),
 			"latest_request": taskStats.LatestRequest,
 		},
 		"success_rate": map[string]any{
