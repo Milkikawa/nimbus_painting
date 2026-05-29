@@ -29,7 +29,7 @@ window.addEventListener('popstate', () => navigate(readView(), false));
 
 boot();
 
-applyTheme(localStorage.getItem('np_theme') || 'light');
+applyTheme(localStorage.getItem('np_theme') || 'dark');
 
 async function boot() {
   await refreshStatus();
@@ -44,9 +44,8 @@ async function boot() {
 async function refreshStatus() {
   state.status = await api('/admin/api/status');
   el.serviceStatus.textContent = state.status.upstream_configured ? '上游已配置' : '待配置上游';
-  el.serviceStatus.style.borderColor = state.status.upstream_configured ? '#bbf7d0' : '#fed7aa';
-  el.serviceStatus.style.background = state.status.upstream_configured ? '#f0fdf4' : '#fff7ed';
-  el.serviceStatus.style.color = state.status.upstream_configured ? '#15803d' : '#c2410c';
+  el.serviceStatus.classList.toggle('ok', state.status.upstream_configured);
+  el.serviceStatus.classList.toggle('warn', !state.status.upstream_configured);
 }
 
 function showAuth() {

@@ -1,13 +1,19 @@
 import { api, asList, escapeHTML, fmtDate } from '../api.js';
 
+let activeLogs = [];
+
 export const logsPage = {
   title: '请求日志',
   eyebrow: '请求审计',
+  cleanup() {
+    closeLogSheet();
+    activeLogs = [];
+  },
   async render(ctx) {
     ctx.root.innerHTML = `
       <section class="card">
         <div class="card-header">
-          <div><h2>请求日志</h2><p class="muted">展示最近 100 条请求记录，包含实际生图参数、上游原始响应和下游返回图片链接。</p></div>
+          <div><h2>请求日志</h2><p class="muted">默认只显示摘要；完整 Prompt、请求体和响应体通过详情抽屉查看，避免窄屏长文本换行挤压。</p></div>
           <button id="reloadLogs" class="button-secondary">刷新</button>
         </div>
         <div id="logsRoot"></div>
@@ -18,35 +24,35 @@ export const logsPage = {
 };
 
 async function loadLogs(ctx) {
-  const list = asList(await api('/admin/api/logs'));
+  const list = asList(await api('/admin/api/logs')).map(normalizeLog);
   const root = document.getElementById('logsRoot');
+  activeLogs = list;
   if (!list.length) {
     root.innerHTML = '<div class="empty">暂无请求日志</div>';
     return;
   }
   root.innerHTML = `${renderTable(list)}${renderCards(list)}`;
+  root.querySelectorAll('[data-log-detail]').forEach((button) => {
+    button.addEventListener('click', () => openLogSheet(Number(button.dataset.logDetail)));
+  });
 }
 
 function renderTable(list) {
-  return `<div class="table-wrap logs-table"><table><thead><tr><th>时间</th><th>结果</th><th>模型</th><th>生图参数</th><th>提示词</th><th>上游响应</th><th>图片链接</th><th>错误</th></tr></thead><tbody>${list.map((log) => {
-    const data = normalizeLog(log);
-    return `<tr>
+  return `<div class="table-wrap logs-table"><table><thead><tr><th>时间</th><th>结果</th><th>模型</th><th>生图参数</th><th>提示词摘要</th><th>上游摘要</th><th>详情</th></tr></thead><tbody>${list.map((data, index) => `
+    <tr>
       <td class="nowrap">${escapeHTML(data.createdAt)}</td>
       <td>${statusBadge(data.ok)}</td>
       <td class="nowrap">sd${escapeHTML(data.modelIndex)}<br><span class="muted">${escapeHTML(data.upstreamModelName)}</span></td>
       <td class="nowrap">${escapeHTML(data.size)}<br><span class="muted">steps ${escapeHTML(data.steps)} / cfg ${escapeHTML(data.cfg)}</span><br><span class="muted">seed ${escapeHTML(data.seed)}</span></td>
-      <td>${logBlock('用户输入', data.rawPrompt)}${logBlock('最终正面', data.finalPrompt)}${data.negativePrompt ? logBlock('负面提示词', data.negativePrompt) : ''}</td>
-      <td>${logBlock('状态码', data.upstreamStatus)}${logBlock('原始响应', data.upstreamResponseBody)}${logBlock('点数', data.pointsText)}</td>
-      <td>${linkBlock('下游返回', data.downstreamImageURL)}${linkBlock('上游原图', data.upstreamImageURL)}${data.imageSaveError ? logBlock('本地保存错误', data.imageSaveError, 'error-text') : ''}</td>
-      <td><div class="log-text error-text">${escapeHTML(data.errorMessage)}</div></td>
-    </tr>`;
-  }).join('')}</tbody></table></div>`;
+      <td><div class="log-summary">${escapeHTML(summary(data.finalPrompt || data.rawPrompt))}</div></td>
+      <td><div class="log-summary ${data.errorMessage ? 'error-text' : ''}">${escapeHTML(summary(data.errorMessage || data.upstreamResponseBody || data.pointsText))}</div></td>
+      <td><button class="detail-button" type="button" data-log-detail="${index}">查看完整</button></td>
+    </tr>`).join('')}</tbody></table></div>`;
 }
 
 function renderCards(list) {
-  return `<div class="log-cards">${list.map((log) => {
-    const data = normalizeLog(log);
-    return `<article class="log-card">
+  return `<div class="log-cards">${list.map((data, index) => `
+    <article class="log-card">
       <div class="log-card-head">
         <div>
           <strong>${escapeHTML(data.createdAt)}</strong>
@@ -54,19 +60,10 @@ function renderCards(list) {
         </div>
         ${statusBadge(data.ok)}
       </div>
-      ${logBlock('用户输入', data.rawPrompt)}
-      ${logBlock('最终正面提示词', data.finalPrompt)}
-      ${data.negativePrompt ? logBlock('负面提示词', data.negativePrompt) : ''}
-      ${logBlock('实际上游请求体', data.upstreamRequestBody)}
-      ${logBlock('上游原始响应体', data.upstreamResponseBody)}
-      ${logBlock('上游模型名称', data.upstreamModelName)}
-      ${logBlock('点数信息', data.pointsText)}
-      ${linkBlock('下游返回图片', data.downstreamImageURL)}
-      ${linkBlock('上游原图', data.upstreamImageURL)}
-      ${data.imageSaveError ? logBlock('本地保存错误', data.imageSaveError, 'error-text') : ''}
-      ${data.errorMessage ? logBlock('错误', data.errorMessage, 'error-text') : ''}
-    </article>`;
-  }).join('')}</div>`;
+      ${summaryBlock('提示词摘要', data.finalPrompt || data.rawPrompt)}
+      ${summaryBlock('上游摘要', data.errorMessage || data.upstreamResponseBody || data.pointsText, data.errorMessage ? 'error-text' : '')}
+      <button class="detail-button" type="button" data-log-detail="${index}">展开完整请求与响应</button>
+    </article>`).join('')}</div>`;
 }
 
 function normalizeLog(log) {
@@ -95,17 +92,72 @@ function normalizeLog(log) {
   };
 }
 
+function openLogSheet(index) {
+  const data = activeLogs[index];
+  if (!data) return;
+  closeLogSheet();
+  const sheet = document.createElement('section');
+  sheet.className = 'log-sheet';
+  sheet.setAttribute('role', 'dialog');
+  sheet.setAttribute('aria-modal', 'true');
+  sheet.innerHTML = `
+    <div class="log-sheet-panel">
+      <div class="log-sheet-head">
+        <div>
+          <strong>${escapeHTML(data.createdAt)}</strong>
+          <div class="muted">sd${escapeHTML(data.modelIndex)} · ${escapeHTML(data.size)} · ${data.ok ? '成功' : '失败'}</div>
+        </div>
+        <button class="button-secondary" type="button" data-close-log>关闭</button>
+      </div>
+      <div class="log-sheet-body">
+        ${detailBlock('用户输入', data.rawPrompt)}
+        ${detailBlock('最终正面提示词', data.finalPrompt)}
+        ${data.negativePrompt ? detailBlock('负面提示词', data.negativePrompt) : ''}
+        ${detailBlock('实际上游请求体', data.upstreamRequestBody)}
+        ${detailBlock('上游原始响应体', data.upstreamResponseBody)}
+        ${detailBlock('点数信息', data.pointsText)}
+        ${detailLink('下游返回图片', data.downstreamImageURL)}
+        ${detailLink('上游原图', data.upstreamImageURL)}
+        ${data.imageSaveError ? detailBlock('本地保存错误', data.imageSaveError, 'error-text') : ''}
+        ${data.errorMessage ? detailBlock('错误', data.errorMessage, 'error-text') : ''}
+      </div>
+    </div>`;
+  sheet.addEventListener('click', (event) => {
+    if (event.target === sheet || event.target.closest('[data-close-log]')) closeLogSheet();
+  });
+  document.addEventListener('keydown', closeOnEscape);
+  document.body.appendChild(sheet);
+}
+
+function closeLogSheet() {
+  document.querySelector('.log-sheet')?.remove();
+  document.removeEventListener('keydown', closeOnEscape);
+}
+
+function closeOnEscape(event) {
+  if (event.key === 'Escape') closeLogSheet();
+}
+
 function statusBadge(ok) {
   return `<span class="badge ${ok ? 'ok' : 'fail'}">${ok ? '成功' : '失败'}</span>`;
 }
 
-function logBlock(label, value, extraClass = '') {
-  return `<section class="log-block"><span>${label}</span><div class="log-text ${extraClass}">${escapeHTML(value || '—')}</div></section>`;
+function summaryBlock(label, value, extraClass = '') {
+  return `<section class="log-block"><span>${label}</span><div class="log-summary ${extraClass}">${escapeHTML(summary(value))}</div></section>`;
 }
 
-function linkBlock(label, value) {
-  if (!value) return logBlock(label, '—');
-  return `<section class="log-block"><span>${label}</span><div class="log-text"><a href="${escapeHTML(value)}" target="_blank" rel="noreferrer">${escapeHTML(value)}</a></div></section>`;
+function detailBlock(label, value, extraClass = '') {
+  return `<section class="log-block"><span>${label}</span><pre class="${extraClass}">${escapeHTML(value || '—')}</pre></section>`;
+}
+
+function detailLink(label, value) {
+  if (!value) return detailBlock(label, '—');
+  return `<section class="log-block"><span>${label}</span><a href="${escapeHTML(value)}" target="_blank" rel="noreferrer">${escapeHTML(value)}</a></section>`;
+}
+
+function summary(value) {
+  const compact = String(value || '—').replace(/\s+/g, ' ').trim();
+  return compact.length > 120 ? `${compact.slice(0, 120)}…` : compact;
 }
 
 function prettyJSON(value) {

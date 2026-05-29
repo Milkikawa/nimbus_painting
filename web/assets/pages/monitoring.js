@@ -51,7 +51,7 @@ async function loadMonitoring() {
       <div class="metric"><span>进行中任务</span><strong>${data.tasks?.running ?? 0}</strong></div>
       <div class="metric"><span>已完成任务成功率</span><strong>${percent(data.success_rate?.percentage)}</strong></div>
     </div>
-    <section class="card" style="margin-top:16px;box-shadow:none">
+    <section class="card recent-activity">
       <h2>最近活动</h2>
       <p class="muted">最近图片：${fmtDate(data.images?.latest_image)} · 最近请求：${fmtDate(data.tasks?.latest_request)}</p>
       <p class="muted">说明：成功率只按已结束的任务记录计算，进行中任务单独显示，不会提前算成功或失败。</p>
