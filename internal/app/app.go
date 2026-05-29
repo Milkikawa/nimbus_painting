@@ -143,15 +143,19 @@ func (a *App) chatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	positive, negative := a.selectedPrompts(r.Context(), settings)
 	finalPrompt := parser.AppendPositive(parsed.Prompt, positive)
-	reqLog := model.RequestLog{ID: store.NewID("req"), CreatedAt: time.Now(), Model: req.Model, ModelIndex: parsed.ModelIndex, RawPrompt: content, FinalPrompt: finalPrompt, NegativePrompt: negative, Width: parsed.Width, Height: parsed.Height, Steps: parsed.Steps, CFG: parsed.CFG, Seed: parsed.Seed}
+	reqLog := model.RequestLog{ID: store.NewID("req"), CreatedAt: time.Now(), Model: req.Model, ModelIndex: parsed.ModelIndex, RawPrompt: content, FinalPrompt: finalPrompt, NegativePrompt: negative, Width: parsed.Width, Height: parsed.Height, Steps: parsed.Steps, CFG: parsed.CFG, Seed: parsed.Seed, UpstreamEndpoint: settings.UpstreamEndpoint, ImageReturnMode: "upstream_url"}
 	a.activeRequests.Add(1)
 	defer a.activeRequests.Add(-1)
 
 	upReq := upstream.Request{Prompt: finalPrompt, NegativePrompt: negative, Width: parsed.Width, Height: parsed.Height, Steps: parsed.Steps, CFG: parsed.CFG, ModelIndex: parsed.ModelIndex, Seed: parsed.Seed}
+	if body, err := json.Marshal(upReq); err == nil {
+		reqLog.UpstreamRequestBody = string(body)
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(settings.RequestTimeout)*time.Second)
 	defer cancel()
 	upResult, err := upstream.Generate(ctx, settings.UpstreamEndpoint, authorization, time.Duration(settings.RequestTimeout)*time.Second, upReq)
 	reqLog.UpstreamStatus = upResult.StatusCode
+	reqLog.UpstreamResponseBody = string(upResult.Body)
 	if err != nil {
 		reqLog.ErrorMessage = err.Error()
 		_ = a.store.InsertRequestLog(context.Background(), reqLog)
@@ -160,11 +164,19 @@ func (a *App) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	imageURL := upResult.Parsed.Data.ImageURL
+	reqLog.UpstreamImageURL = imageURL
+	reqLog.UpstreamImageID = stringifyAny(upResult.Parsed.Data.ImageID)
+	reqLog.UpstreamModelName = upResult.Parsed.Data.ModelName
+	reqLog.PointsUsed = upResult.Parsed.Data.PointsUsed
+	reqLog.RemainingPoints = upResult.Parsed.Data.RemainingPoints
+	reqLog.DownstreamImageURL = imageURL
 	saved, saveErr := imageio.Save(context.Background(), a.effectiveImageDir(settings), a.cfg.PublicBaseURL, imageURL, reqLog)
 	if saveErr != nil {
+		reqLog.ImageSaveError = saveErr.Error()
 		log.Printf("image_save_failed request_id=%s error=%v", reqLog.ID, saveErr)
 	} else {
-		imageURL = saved.PublicURL
+		saved.UpstreamImageID = reqLog.UpstreamImageID
+		saved.UpstreamModelName = reqLog.UpstreamModelName
 		reqLog.ImageRecordID = saved.ID
 		_ = a.store.InsertImageRecord(context.Background(), saved)
 	}
@@ -262,6 +274,13 @@ func (a *App) serveImage(w http.ResponseWriter, r *http.Request) {
 func chatCompletion(modelName, imageURL string, log model.RequestLog) map[string]any {
 	content := fmt.Sprintf("![generated image](%s)\n\nImage URL: %s\nSeed: %d\nModel: sd%d", imageURL, imageURL, log.Seed, log.ModelIndex)
 	return map[string]any{"id": log.ID, "object": "chat.completion", "created": time.Now().Unix(), "model": modelName, "choices": []map[string]any{{"index": 0, "message": map[string]any{"role": "assistant", "content": content}, "finish_reason": "stop"}}, "usage": map[string]int{"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}}
+}
+
+func stringifyAny(value any) string {
+	if value == nil {
+		return ""
+	}
+	return fmt.Sprint(value)
 }
 
 func (a *App) writeStream(w http.ResponseWriter, modelName, imageURL string, log model.RequestLog) {

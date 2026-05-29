@@ -83,6 +83,9 @@ func (s *Store) Migrate(ctx context.Context) error {
 			return err
 		}
 	}
+	if err := s.ensureSchemaColumns(ctx); err != nil {
+		return err
+	}
 	return s.seedDefaults(ctx, s.cfg)
 }
 
@@ -100,11 +103,80 @@ func (s *Store) schema() []string {
 	return []string{
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS settings (key_name %s, value_text %s NOT NULL, updated_at %s NOT NULL)`, textPK, text, text),
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS prompt_groups (id %s, name %s NOT NULL, type %s NOT NULL, content %s NOT NULL, remark %s NOT NULL, created_at %s NOT NULL, updated_at %s NOT NULL)`, textPK, text, text, text, text, text, text),
-		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS request_logs (id %s, created_at %s NOT NULL, model %s NOT NULL, model_index %s NOT NULL, raw_prompt %s NOT NULL, final_prompt %s NOT NULL, negative_prompt %s NOT NULL, width %s NOT NULL, height %s NOT NULL, steps %s NOT NULL, cfg %s NOT NULL, seed %s NOT NULL, success %s NOT NULL, error_message %s NOT NULL, upstream_status %s NOT NULL, image_record_id %s NOT NULL)`, textPK, text, text, integer, text, text, text, integer, integer, integer, real, integer, integer, text, integer, text),
-		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS image_records (id %s, created_at %s NOT NULL, upstream_image_url %s NOT NULL, local_path %s NOT NULL, public_url %s NOT NULL, filename %s NOT NULL, model_index %s NOT NULL, seed %s NOT NULL, width %s NOT NULL, height %s NOT NULL, prompt %s NOT NULL, negative_prompt %s NOT NULL, deleted_at %s NOT NULL DEFAULT '')`, textPK, text, text, text, text, text, integer, integer, integer, integer, text, text, text),
+		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS request_logs (id %s, created_at %s NOT NULL, model %s NOT NULL, model_index %s NOT NULL, raw_prompt %s NOT NULL, final_prompt %s NOT NULL, negative_prompt %s NOT NULL, width %s NOT NULL, height %s NOT NULL, steps %s NOT NULL, cfg %s NOT NULL, seed %s NOT NULL, success %s NOT NULL, error_message %s NOT NULL, upstream_status %s NOT NULL, upstream_endpoint %s NOT NULL, upstream_request_body %s NOT NULL, upstream_response_body %s NOT NULL, upstream_image_url %s NOT NULL, upstream_image_id %s NOT NULL, upstream_model_name %s NOT NULL, points_used %s NOT NULL, remaining_points %s NOT NULL, downstream_image_url %s NOT NULL, image_return_mode %s NOT NULL, image_save_error %s NOT NULL, image_record_id %s NOT NULL)`, textPK, text, text, integer, text, text, text, integer, integer, integer, real, integer, integer, text, integer, text, text, text, text, text, text, integer, integer, text, text, text, text),
+		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS image_records (id %s, created_at %s NOT NULL, upstream_image_url %s NOT NULL, upstream_image_id %s NOT NULL, upstream_model_name %s NOT NULL, local_path %s NOT NULL, public_url %s NOT NULL, filename %s NOT NULL, model_index %s NOT NULL, seed %s NOT NULL, width %s NOT NULL, height %s NOT NULL, prompt %s NOT NULL, negative_prompt %s NOT NULL, deleted_at %s NOT NULL DEFAULT '')`, textPK, text, text, text, text, text, text, text, integer, integer, integer, integer, text, text, text),
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS admin_sessions (id %s, expires_at %s NOT NULL)`, textPK, text),
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS audit_logs (id %s, created_at %s NOT NULL, action %s NOT NULL, message %s NOT NULL)`, textPK, text, text, text),
 	}
+}
+
+func (s *Store) ensureSchemaColumns(ctx context.Context) error {
+	requestColumns := map[string]string{
+		"upstream_endpoint":      "TEXT",
+		"upstream_request_body":  "TEXT",
+		"upstream_response_body": "TEXT",
+		"upstream_image_url":     "TEXT",
+		"upstream_image_id":      "TEXT",
+		"upstream_model_name":    "TEXT",
+		"points_used":            "INTEGER NOT NULL DEFAULT 0",
+		"remaining_points":       "INTEGER NOT NULL DEFAULT 0",
+		"downstream_image_url":   "TEXT",
+		"image_return_mode":      "TEXT",
+		"image_save_error":       "TEXT",
+	}
+	for name, definition := range requestColumns {
+		if err := s.ensureColumn(ctx, "request_logs", name, definition); err != nil {
+			return err
+		}
+	}
+	imageColumns := map[string]string{
+		"upstream_image_id":   "TEXT",
+		"upstream_model_name": "TEXT",
+	}
+	for name, definition := range imageColumns {
+		if err := s.ensureColumn(ctx, "image_records", name, definition); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) ensureColumn(ctx context.Context, table, column, definition string) error {
+	exists, err := s.columnExists(ctx, table, column)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	_, err = s.db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, definition))
+	return err
+}
+
+func (s *Store) columnExists(ctx context.Context, table, column string) (bool, error) {
+	if s.driver == "mariadb" {
+		var count int
+		err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?`, table, column).Scan(&count)
+		return count > 0, err
+	}
+	rows, err := s.db.QueryContext(ctx, fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, columnType string
+		var notNull, pk int
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &pk); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 func (s *Store) seedDefaults(ctx context.Context, cfg config.Config) error {
@@ -117,7 +189,7 @@ func (s *Store) seedDefaults(ctx context.Context, cfg config.Config) error {
 		"min_dimension":           "64",
 		"max_dimension":           "2048",
 		"request_timeout_seconds": "120",
-		"image_save_dir":          "images",
+		"image_save_dir":          cfg.ImageDir,
 	}
 	if cfg.UpstreamEndpoint != "" {
 		defaults["upstream_endpoint"] = cfg.UpstreamEndpoint
@@ -260,12 +332,12 @@ func (s *Store) DeletePromptGroup(ctx context.Context, id string) error {
 }
 
 func (s *Store) InsertRequestLog(ctx context.Context, log model.RequestLog) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO request_logs (id,created_at,model,model_index,raw_prompt,final_prompt,negative_prompt,width,height,steps,cfg,seed,success,error_message,upstream_status,image_record_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, log.ID, log.CreatedAt.Format(time.RFC3339), log.Model, log.ModelIndex, log.RawPrompt, log.FinalPrompt, log.NegativePrompt, log.Width, log.Height, log.Steps, log.CFG, log.Seed, boolInt(log.Success), log.ErrorMessage, log.UpstreamStatus, log.ImageRecordID)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO request_logs (id,created_at,model,model_index,raw_prompt,final_prompt,negative_prompt,width,height,steps,cfg,seed,success,error_message,upstream_status,upstream_endpoint,upstream_request_body,upstream_response_body,upstream_image_url,upstream_image_id,upstream_model_name,points_used,remaining_points,downstream_image_url,image_return_mode,image_save_error,image_record_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, log.ID, log.CreatedAt.Format(time.RFC3339), log.Model, log.ModelIndex, log.RawPrompt, log.FinalPrompt, log.NegativePrompt, log.Width, log.Height, log.Steps, log.CFG, log.Seed, boolInt(log.Success), log.ErrorMessage, log.UpstreamStatus, log.UpstreamEndpoint, log.UpstreamRequestBody, log.UpstreamResponseBody, log.UpstreamImageURL, log.UpstreamImageID, log.UpstreamModelName, log.PointsUsed, log.RemainingPoints, log.DownstreamImageURL, log.ImageReturnMode, log.ImageSaveError, log.ImageRecordID)
 	return err
 }
 
 func (s *Store) ListRequestLogs(ctx context.Context, limit int) ([]model.RequestLog, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,created_at,model,model_index,raw_prompt,final_prompt,negative_prompt,width,height,steps,cfg,seed,success,error_message,upstream_status,image_record_id FROM request_logs ORDER BY created_at DESC LIMIT ?`, limit)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,created_at,model,model_index,raw_prompt,final_prompt,negative_prompt,width,height,steps,cfg,seed,success,error_message,upstream_status,COALESCE(upstream_endpoint,''),COALESCE(upstream_request_body,''),COALESCE(upstream_response_body,''),COALESCE(upstream_image_url,''),COALESCE(upstream_image_id,''),COALESCE(upstream_model_name,''),COALESCE(points_used,0),COALESCE(remaining_points,0),COALESCE(downstream_image_url,''),COALESCE(image_return_mode,''),COALESCE(image_save_error,''),image_record_id FROM request_logs ORDER BY created_at DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +347,7 @@ func (s *Store) ListRequestLogs(ctx context.Context, limit int) ([]model.Request
 		var item model.RequestLog
 		var created string
 		var success int
-		if err := rows.Scan(&item.ID, &created, &item.Model, &item.ModelIndex, &item.RawPrompt, &item.FinalPrompt, &item.NegativePrompt, &item.Width, &item.Height, &item.Steps, &item.CFG, &item.Seed, &success, &item.ErrorMessage, &item.UpstreamStatus, &item.ImageRecordID); err != nil {
+		if err := rows.Scan(&item.ID, &created, &item.Model, &item.ModelIndex, &item.RawPrompt, &item.FinalPrompt, &item.NegativePrompt, &item.Width, &item.Height, &item.Steps, &item.CFG, &item.Seed, &success, &item.ErrorMessage, &item.UpstreamStatus, &item.UpstreamEndpoint, &item.UpstreamRequestBody, &item.UpstreamResponseBody, &item.UpstreamImageURL, &item.UpstreamImageID, &item.UpstreamModelName, &item.PointsUsed, &item.RemainingPoints, &item.DownstreamImageURL, &item.ImageReturnMode, &item.ImageSaveError, &item.ImageRecordID); err != nil {
 			return nil, err
 		}
 		item.CreatedAt = parseTime(created)
@@ -286,12 +358,12 @@ func (s *Store) ListRequestLogs(ctx context.Context, limit int) ([]model.Request
 }
 
 func (s *Store) InsertImageRecord(ctx context.Context, image model.ImageRecord) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO image_records (id,created_at,upstream_image_url,local_path,public_url,filename,model_index,seed,width,height,prompt,negative_prompt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, image.ID, image.CreatedAt.Format(time.RFC3339), image.UpstreamImageURL, image.LocalPath, image.PublicURL, image.Filename, image.ModelIndex, image.Seed, image.Width, image.Height, image.Prompt, image.NegativePrompt)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO image_records (id,created_at,upstream_image_url,upstream_image_id,upstream_model_name,local_path,public_url,filename,model_index,seed,width,height,prompt,negative_prompt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, image.ID, image.CreatedAt.Format(time.RFC3339), image.UpstreamImageURL, image.UpstreamImageID, image.UpstreamModelName, image.LocalPath, image.PublicURL, image.Filename, image.ModelIndex, image.Seed, image.Width, image.Height, image.Prompt, image.NegativePrompt)
 	return err
 }
 
 func (s *Store) ListImages(ctx context.Context, limit int) ([]model.ImageRecord, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,created_at,upstream_image_url,local_path,public_url,filename,model_index,seed,width,height,prompt,negative_prompt FROM image_records WHERE deleted_at='' ORDER BY created_at DESC LIMIT ?`, limit)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,created_at,upstream_image_url,COALESCE(upstream_image_id,''),COALESCE(upstream_model_name,''),local_path,public_url,filename,model_index,seed,width,height,prompt,negative_prompt FROM image_records WHERE deleted_at='' ORDER BY created_at DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -300,7 +372,7 @@ func (s *Store) ListImages(ctx context.Context, limit int) ([]model.ImageRecord,
 	for rows.Next() {
 		var image model.ImageRecord
 		var created string
-		if err := rows.Scan(&image.ID, &created, &image.UpstreamImageURL, &image.LocalPath, &image.PublicURL, &image.Filename, &image.ModelIndex, &image.Seed, &image.Width, &image.Height, &image.Prompt, &image.NegativePrompt); err != nil {
+		if err := rows.Scan(&image.ID, &created, &image.UpstreamImageURL, &image.UpstreamImageID, &image.UpstreamModelName, &image.LocalPath, &image.PublicURL, &image.Filename, &image.ModelIndex, &image.Seed, &image.Width, &image.Height, &image.Prompt, &image.NegativePrompt); err != nil {
 			return nil, err
 		}
 		image.CreatedAt = parseTime(created)
