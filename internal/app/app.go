@@ -400,8 +400,12 @@ func (a *App) adminLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sid := store.NewID("sess")
-	_ = a.store.SaveSession(r.Context(), sid, time.Now().Add(a.cfg.SessionTTL))
-	http.SetCookie(w, &http.Cookie{Name: "np_session", Value: sid, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Expires: time.Now().Add(a.cfg.SessionTTL)})
+	expiresAt := time.Now().Add(a.cfg.SessionTTL)
+	if err := a.store.SaveSession(r.Context(), sid, expiresAt); err != nil {
+		openAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "session_save_failed")
+		return
+	}
+	http.SetCookie(w, &http.Cookie{Name: "np_session", Value: sid, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Expires: expiresAt})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
