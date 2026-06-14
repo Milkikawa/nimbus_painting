@@ -438,7 +438,10 @@ func (a *App) updateSettings(w http.ResponseWriter, r *http.Request) {
 		if k == "dashboard_password_hash" {
 			continue
 		}
-		_ = a.store.SetSetting(r.Context(), k, v)
+		if err := a.store.SetSetting(r.Context(), k, v); err != nil {
+			openAIError(w, 500, err.Error(), "server_error", "settings_save_failed")
+			return
+		}
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
