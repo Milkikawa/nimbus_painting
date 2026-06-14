@@ -529,11 +529,14 @@ func (a *App) deleteImage(w http.ResponseWriter, r *http.Request) {
 		openAIError(w, 500, err.Error(), "server_error", "image_delete_failed")
 		return
 	}
-	if abs, err := filepath.Abs(path); err == nil {
-		settings, _ := a.loadSettings(r.Context())
-		base, _ := filepath.Abs(a.effectiveImageDir(settings))
-		if strings.HasPrefix(abs, base) {
-			_ = os.Remove(abs)
+	if path != "" {
+		abs, absErr := filepath.Abs(path)
+		settings, settingsErr := a.loadSettings(r.Context())
+		base, baseErr := filepath.Abs(a.effectiveImageDir(settings))
+		if absErr == nil && settingsErr == nil && baseErr == nil && isPathWithinBase(base, abs) {
+			if info, statErr := os.Stat(abs); statErr == nil && !info.IsDir() {
+				_ = os.Remove(abs)
+			}
 		}
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})
