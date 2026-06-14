@@ -415,6 +415,10 @@ func (a *App) updateSettings(w http.ResponseWriter, r *http.Request) {
 		openAIError(w, 400, "invalid json", "invalid_request_error", "invalid_json")
 		return
 	}
+	if err := a.validateSettingsUpdate(r.Context(), items); err != nil {
+		openAIError(w, 400, err.Error(), "invalid_request_error", "invalid_settings")
+		return
+	}
 	for k, v := range items {
 		if k == "dashboard_password_hash" {
 			continue
@@ -422,6 +426,69 @@ func (a *App) updateSettings(w http.ResponseWriter, r *http.Request) {
 		_ = a.store.SetSetting(r.Context(), k, v)
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+func (a *App) validateSettingsUpdate(ctx context.Context, items map[string]string) error {
+	current, err := a.store.GetSettings(ctx)
+	if err != nil {
+		return err
+	}
+	merged := make(map[string]string, len(current)+len(items))
+	for k, v := range current {
+		merged[k] = v
+	}
+	for k, v := range items {
+		switch k {
+		case "dashboard_password_hash":
+			continue
+		case "upstream_endpoint", "selected_positive_group_id", "selected_negative_group_id", "image_save_dir":
+			merged[k] = v
+		case "default_model_index", "default_width", "default_height", "default_steps", "min_dimension", "max_dimension", "request_timeout_seconds":
+			if _, err := strconv.Atoi(v); err != nil {
+				return fmt.Errorf("%s must be an integer", k)
+			}
+			merged[k] = v
+		case "default_cfg":
+			if _, err := strconv.ParseFloat(v, 64); err != nil {
+				return fmt.Errorf("%s must be a number", k)
+			}
+			merged[k] = v
+		default:
+			return fmt.Errorf("unknown setting: %s", k)
+		}
+	}
+
+	minDimension := atoi(merged["min_dimension"], 64)
+	maxDimension := atoi(merged["max_dimension"], 2048)
+	defaultWidth := atoi(merged["default_width"], 832)
+	defaultHeight := atoi(merged["default_height"], 1216)
+	defaultModel := atoi(merged["default_model_index"], 4)
+	defaultSteps := atoi(merged["default_steps"], 20)
+	defaultCFG := atof(merged["default_cfg"], 7)
+	requestTimeout := atoi(merged["request_timeout_seconds"], 120)
+
+	if defaultModel < 0 || defaultModel > 13 {
+		return fmt.Errorf("default_model_index must be between 0 and 13")
+	}
+	if minDimension < 1 || maxDimension < 1 || minDimension > maxDimension {
+		return fmt.Errorf("min_dimension and max_dimension must be positive and min_dimension must not exceed max_dimension")
+	}
+	if defaultWidth < minDimension || defaultWidth > maxDimension {
+		return fmt.Errorf("default_width must be between min_dimension and max_dimension")
+	}
+	if defaultHeight < minDimension || defaultHeight > maxDimension {
+		return fmt.Errorf("default_height must be between min_dimension and max_dimension")
+	}
+	if defaultSteps < 1 || defaultSteps > 50 {
+		return fmt.Errorf("default_steps must be between 1 and 50")
+	}
+	if defaultCFG < 1 || defaultCFG > 10 {
+		return fmt.Errorf("default_cfg must be between 1 and 10")
+	}
+	if requestTimeout < 1 || requestTimeout > 600 {
+		return fmt.Errorf("request_timeout_seconds must be between 1 and 600")
+	}
+	return nil
 }
 func (a *App) listPromptGroups(w http.ResponseWriter, r *http.Request) {
 	groups, err := a.store.ListPromptGroups(r.Context())
