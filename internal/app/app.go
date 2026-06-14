@@ -264,11 +264,19 @@ func (a *App) serveImage(w http.ResponseWriter, r *http.Request) {
 	}
 	relative := strings.TrimPrefix(r.URL.Path, "/images/")
 	target, err := filepath.Abs(filepath.Join(base, relative))
-	if err != nil || !strings.HasPrefix(target, base) {
+	if err != nil || !isPathWithinBase(base, target) {
 		http.NotFound(w, r)
 		return
 	}
 	http.ServeFile(w, r, target)
+}
+
+func isPathWithinBase(base, target string) bool {
+	rel, err := filepath.Rel(base, target)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) && !filepath.IsAbs(rel))
 }
 
 func chatCompletion(modelName, imageURL string, log model.RequestLog) map[string]any {
