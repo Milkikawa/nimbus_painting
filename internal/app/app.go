@@ -373,8 +373,15 @@ func (a *App) adminInit(w http.ResponseWriter, r *http.Request) {
 		openAIError(w, http.StatusBadRequest, "password must be at least 8 chars", "invalid_request_error", "weak_password")
 		return
 	}
-	hash, _ := bcrypt.GenerateFromPassword([]byte(body.Password), bcrypt.DefaultCost)
-	_ = a.store.SetSetting(r.Context(), "dashboard_password_hash", string(hash))
+	hash, err := bcrypt.GenerateFromPassword([]byte(body.Password), bcrypt.DefaultCost)
+	if err != nil {
+		openAIError(w, http.StatusInternalServerError, "password hashing failed", "server_error", "password_hash_failed")
+		return
+	}
+	if err := a.store.SetSetting(r.Context(), "dashboard_password_hash", string(hash)); err != nil {
+		openAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "admin_init_failed")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
