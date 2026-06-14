@@ -226,7 +226,11 @@ func (a *App) loadSettings(ctx context.Context) (model.Settings, error) {
 	if err != nil {
 		return model.Settings{}, err
 	}
-	return model.Settings{UpstreamEndpoint: items["upstream_endpoint"], DefaultModel: atoi(items["default_model_index"], 4), DefaultWidth: atoi(items["default_width"], 832), DefaultHeight: atoi(items["default_height"], 1216), DefaultSteps: atoi(items["default_steps"], 20), DefaultCFG: atof(items["default_cfg"], 7), MinDimension: atoi(items["min_dimension"], 64), MaxDimension: atoi(items["max_dimension"], 2048), RequestTimeout: atoi(items["request_timeout_seconds"], 120), PositiveGroupID: items["selected_positive_group_id"], NegativeGroupID: items["selected_negative_group_id"], ImageSaveDir: items["image_save_dir"]}, nil
+	settings := model.Settings{UpstreamEndpoint: items["upstream_endpoint"], DefaultModel: atoi(items["default_model_index"], 4), DefaultWidth: atoi(items["default_width"], 832), DefaultHeight: atoi(items["default_height"], 1216), DefaultSteps: atoi(items["default_steps"], 20), DefaultCFG: atof(items["default_cfg"], 7), MinDimension: atoi(items["min_dimension"], 64), MaxDimension: atoi(items["max_dimension"], 2048), RequestTimeout: atoi(items["request_timeout_seconds"], 120), PositiveGroupID: items["selected_positive_group_id"], NegativeGroupID: items["selected_negative_group_id"], ImageSaveDir: items["image_save_dir"]}
+	if settings.RequestTimeout < 1 {
+		settings.RequestTimeout = 120
+	}
+	return settings, nil
 }
 
 func (a *App) selectedPrompts(ctx context.Context, settings model.Settings) (string, string) {
@@ -264,11 +268,19 @@ func (a *App) serveImage(w http.ResponseWriter, r *http.Request) {
 	}
 	relative := strings.TrimPrefix(r.URL.Path, "/images/")
 	target, err := filepath.Abs(filepath.Join(base, relative))
-	if err != nil || !strings.HasPrefix(target, base) {
+	if err != nil || !isPathWithinBase(base, target) {
 		http.NotFound(w, r)
 		return
 	}
 	http.ServeFile(w, r, target)
+}
+
+func isPathWithinBase(base, target string) bool {
+	rel, err := filepath.Rel(base, target)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) && !filepath.IsAbs(rel))
 }
 
 func chatCompletion(modelName, imageURL string, log model.RequestLog) map[string]any {
@@ -361,8 +373,15 @@ func (a *App) adminInit(w http.ResponseWriter, r *http.Request) {
 		openAIError(w, http.StatusBadRequest, "password must be at least 8 chars", "invalid_request_error", "weak_password")
 		return
 	}
-	hash, _ := bcrypt.GenerateFromPassword([]byte(body.Password), bcrypt.DefaultCost)
-	_ = a.store.SetSetting(r.Context(), "dashboard_password_hash", string(hash))
+	hash, err := bcrypt.GenerateFromPassword([]byte(body.Password), bcrypt.DefaultCost)
+	if err != nil {
+		openAIError(w, http.StatusInternalServerError, "password hashing failed", "server_error", "password_hash_failed")
+		return
+	}
+	if err := a.store.SetSetting(r.Context(), "dashboard_password_hash", string(hash)); err != nil {
+		openAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "admin_init_failed")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -381,8 +400,12 @@ func (a *App) adminLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sid := store.NewID("sess")
-	_ = a.store.SaveSession(r.Context(), sid, time.Now().Add(a.cfg.SessionTTL))
-	http.SetCookie(w, &http.Cookie{Name: "np_session", Value: sid, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Expires: time.Now().Add(a.cfg.SessionTTL)})
+	expiresAt := time.Now().Add(a.cfg.SessionTTL)
+	if err := a.store.SaveSession(r.Context(), sid, expiresAt); err != nil {
+		openAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "session_save_failed")
+		return
+	}
+	http.SetCookie(w, &http.Cookie{Name: "np_session", Value: sid, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Expires: expiresAt})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -407,13 +430,83 @@ func (a *App) updateSettings(w http.ResponseWriter, r *http.Request) {
 		openAIError(w, 400, "invalid json", "invalid_request_error", "invalid_json")
 		return
 	}
+	if err := a.validateSettingsUpdate(r.Context(), items); err != nil {
+		openAIError(w, 400, err.Error(), "invalid_request_error", "invalid_settings")
+		return
+	}
 	for k, v := range items {
 		if k == "dashboard_password_hash" {
 			continue
 		}
-		_ = a.store.SetSetting(r.Context(), k, v)
+		if err := a.store.SetSetting(r.Context(), k, v); err != nil {
+			openAIError(w, 500, err.Error(), "server_error", "settings_save_failed")
+			return
+		}
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+func (a *App) validateSettingsUpdate(ctx context.Context, items map[string]string) error {
+	current, err := a.store.GetSettings(ctx)
+	if err != nil {
+		return err
+	}
+	merged := make(map[string]string, len(current)+len(items))
+	for k, v := range current {
+		merged[k] = v
+	}
+	for k, v := range items {
+		switch k {
+		case "dashboard_password_hash":
+			continue
+		case "upstream_endpoint", "selected_positive_group_id", "selected_negative_group_id", "image_save_dir":
+			merged[k] = v
+		case "default_model_index", "default_width", "default_height", "default_steps", "min_dimension", "max_dimension", "request_timeout_seconds":
+			if _, err := strconv.Atoi(v); err != nil {
+				return fmt.Errorf("%s must be an integer", k)
+			}
+			merged[k] = v
+		case "default_cfg":
+			if _, err := strconv.ParseFloat(v, 64); err != nil {
+				return fmt.Errorf("%s must be a number", k)
+			}
+			merged[k] = v
+		default:
+			return fmt.Errorf("unknown setting: %s", k)
+		}
+	}
+
+	minDimension := atoi(merged["min_dimension"], 64)
+	maxDimension := atoi(merged["max_dimension"], 2048)
+	defaultWidth := atoi(merged["default_width"], 832)
+	defaultHeight := atoi(merged["default_height"], 1216)
+	defaultModel := atoi(merged["default_model_index"], 4)
+	defaultSteps := atoi(merged["default_steps"], 20)
+	defaultCFG := atof(merged["default_cfg"], 7)
+	requestTimeout := atoi(merged["request_timeout_seconds"], 120)
+
+	if defaultModel < 0 || defaultModel > 13 {
+		return fmt.Errorf("default_model_index must be between 0 and 13")
+	}
+	if minDimension < 1 || maxDimension < 1 || minDimension > maxDimension {
+		return fmt.Errorf("min_dimension and max_dimension must be positive and min_dimension must not exceed max_dimension")
+	}
+	if defaultWidth < minDimension || defaultWidth > maxDimension {
+		return fmt.Errorf("default_width must be between min_dimension and max_dimension")
+	}
+	if defaultHeight < minDimension || defaultHeight > maxDimension {
+		return fmt.Errorf("default_height must be between min_dimension and max_dimension")
+	}
+	if defaultSteps < 1 || defaultSteps > 50 {
+		return fmt.Errorf("default_steps must be between 1 and 50")
+	}
+	if defaultCFG < 1 || defaultCFG > 10 {
+		return fmt.Errorf("default_cfg must be between 1 and 10")
+	}
+	if requestTimeout < 1 || requestTimeout > 600 {
+		return fmt.Errorf("request_timeout_seconds must be between 1 and 600")
+	}
+	return nil
 }
 func (a *App) listPromptGroups(w http.ResponseWriter, r *http.Request) {
 	groups, err := a.store.ListPromptGroups(r.Context())
@@ -521,11 +614,14 @@ func (a *App) deleteImage(w http.ResponseWriter, r *http.Request) {
 		openAIError(w, 500, err.Error(), "server_error", "image_delete_failed")
 		return
 	}
-	if abs, err := filepath.Abs(path); err == nil {
-		settings, _ := a.loadSettings(r.Context())
-		base, _ := filepath.Abs(a.effectiveImageDir(settings))
-		if strings.HasPrefix(abs, base) {
-			_ = os.Remove(abs)
+	if path != "" {
+		abs, absErr := filepath.Abs(path)
+		settings, settingsErr := a.loadSettings(r.Context())
+		base, baseErr := filepath.Abs(a.effectiveImageDir(settings))
+		if absErr == nil && settingsErr == nil && baseErr == nil && isPathWithinBase(base, abs) {
+			if info, statErr := os.Stat(abs); statErr == nil && !info.IsDir() {
+				_ = os.Remove(abs)
+			}
 		}
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})

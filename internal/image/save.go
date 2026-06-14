@@ -42,8 +42,15 @@ func Save(ctx context.Context, baseDir, publicBaseURL, imageURL string, parsed m
 		return model.ImageRecord{}, err
 	}
 	defer out.Close()
-	if _, err := io.Copy(out, io.LimitReader(resp.Body, 64<<20)); err != nil {
+	limited := io.LimitReader(resp.Body, (64<<20)+1)
+	written, err := io.Copy(out, limited)
+	if err != nil {
 		return model.ImageRecord{}, err
+	}
+	if written > 64<<20 {
+		_ = out.Close()
+		_ = os.Remove(localPath)
+		return model.ImageRecord{}, fmt.Errorf("downloaded image exceeds 64 MiB limit")
 	}
 
 	relativeURL := "/images/" + day + "/" + filename
