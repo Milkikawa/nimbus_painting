@@ -226,7 +226,11 @@ func (a *App) loadSettings(ctx context.Context) (model.Settings, error) {
 	if err != nil {
 		return model.Settings{}, err
 	}
-	return model.Settings{UpstreamEndpoint: items["upstream_endpoint"], DefaultModel: atoi(items["default_model_index"], 4), DefaultWidth: atoi(items["default_width"], 832), DefaultHeight: atoi(items["default_height"], 1216), DefaultSteps: atoi(items["default_steps"], 20), DefaultCFG: atof(items["default_cfg"], 7), MinDimension: atoi(items["min_dimension"], 64), MaxDimension: atoi(items["max_dimension"], 2048), RequestTimeout: atoi(items["request_timeout_seconds"], 120), PositiveGroupID: items["selected_positive_group_id"], NegativeGroupID: items["selected_negative_group_id"], ImageSaveDir: items["image_save_dir"]}, nil
+	settings := model.Settings{UpstreamEndpoint: items["upstream_endpoint"], DefaultModel: atoi(items["default_model_index"], 4), DefaultWidth: atoi(items["default_width"], 832), DefaultHeight: atoi(items["default_height"], 1216), DefaultSteps: atoi(items["default_steps"], 20), DefaultCFG: atof(items["default_cfg"], 7), MinDimension: atoi(items["min_dimension"], 64), MaxDimension: atoi(items["max_dimension"], 2048), RequestTimeout: atoi(items["request_timeout_seconds"], 120), PositiveGroupID: items["selected_positive_group_id"], NegativeGroupID: items["selected_negative_group_id"], ImageSaveDir: items["image_save_dir"]}
+	if settings.RequestTimeout < 1 {
+		settings.RequestTimeout = 120
+	}
+	return settings, nil
 }
 
 func (a *App) selectedPrompts(ctx context.Context, settings model.Settings) (string, string) {
