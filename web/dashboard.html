@@ -1,68 +1,109 @@
-﻿<!doctype html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>Nimbus 绘图转发后台</title>
-  <link rel="stylesheet" href="/assets/app.css">
-</head>
-<body>
-  <div id="toast" class="toast hidden" role="status"></div>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <title>Nimbus 绘图转发后台</title>
+    <link rel="stylesheet" href="/assets/app.css" />
+  </head>
+  <body>
+    <a href="#pageRoot" class="skip-link">跳转到主内容</a>
+    <div
+      id="toast"
+      class="toast hidden"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+    ></div>
 
-  <main id="authView" class="auth-shell hidden">
-    <section class="auth-card">
-      <div class="brand-mark">NP</div>
-      <p class="eyebrow">Nimbus 绘图转发</p>
-      <h1 id="authTitle">登录</h1>
-      <p id="authHint" class="muted">请输入管理员密码进入后台。</p>
-      <label class="field">
-        <span>管理员密码</span>
-        <input id="password" type="password" autocomplete="current-password" placeholder="至少 8 位密码">
-      </label>
-      <div class="auth-actions">
-        <button id="initButton" class="hidden">初始化</button>
-        <button id="loginButton">登录</button>
-      </div>
-      <p id="authMsg" class="message"></p>
-    </section>
-  </main>
-
-  <main id="appView" class="app-shell hidden">
-    <aside class="sidebar">
-      <div class="sidebar-brand">
+    <main id="authView" class="auth-shell hidden">
+      <section class="auth-card">
         <div class="brand-mark">NP</div>
-        <div>
-          <strong>Nimbus Painting</strong>
-          <span>管理后台</span>
+        <p class="eyebrow">Nimbus 绘图转发</p>
+        <h1 id="authTitle">登录</h1>
+        <p id="authHint" class="muted">请输入管理员密码进入后台。</p>
+        <label class="field">
+          <span>管理员密码</span>
+          <input
+            id="password"
+            type="password"
+            autocomplete="current-password"
+            placeholder="至少 8 位密码"
+            aria-describedby="authHint"
+          />
+        </label>
+        <div class="auth-actions">
+          <button id="initButton" class="hidden">初始化</button>
+          <button id="loginButton">登录</button>
         </div>
-      </div>
-      <nav class="nav-list" aria-label="主导航">
-        <button data-view="overview">概览</button>
-        <button data-view="monitoring">项目监测</button>
-        <button data-view="settings">基础设置</button>
-        <button data-view="prompts">提示词组</button>
-        <button data-view="images">图片管理</button>
-        <button data-view="logs">请求日志</button>
-      </nav>
-    </aside>
+        <p id="authMsg" class="message"></p>
+      </section>
+    </main>
 
-    <section class="workspace">
-      <header class="topbar">
-        <div>
-          <p id="viewEyebrow" class="eyebrow">控制台</p>
-          <h1 id="viewTitle">概览</h1>
+    <main id="appView" class="app-shell hidden" role="main">
+      <aside class="sidebar" role="complementary" aria-label="侧边栏导航">
+        <div class="sidebar-brand">
+          <div class="brand-mark">NP</div>
+          <div>
+            <strong>Nimbus Painting</strong>
+            <span>管理后台</span>
+          </div>
         </div>
-        <div class="topbar-actions">
-          <span id="serviceStatus" class="status-pill">检查中</span>
-          <button id="themeButton" class="button-secondary" type="button">夜间模式</button>
-          <button id="logoutButton" class="button-secondary">退出</button>
-        </div>
-      </header>
-      <section id="pageAlert" class="alert hidden"></section>
-      <section id="pageRoot" class="content-grid"></section>
-    </section>
-  </main>
+        <nav class="nav-list" aria-label="主导航">
+          <button data-view="overview">概览</button>
+          <button data-view="monitoring">项目监测</button>
+          <button data-view="settings">基础设置</button>
+          <button data-view="prompts">提示词组</button>
+          <button data-view="images">图片管理</button>
+          <button data-view="logs">请求日志</button>
+        </nav>
+      </aside>
 
-  <script type="module" src="/assets/app.js"></script>
-</body>
+      <section class="workspace" role="region" aria-label="主工作区">
+        <header class="topbar" role="banner" aria-label="页面标题栏">
+          <div>
+            <p id="viewEyebrow" class="eyebrow">控制台</p>
+            <h1 id="viewTitle">概览</h1>
+          </div>
+          <div class="topbar-actions">
+            <span id="serviceStatus" class="status-pill" aria-live="polite"
+              >检查中</span
+            >
+            <button
+              id="themeButton"
+              class="button-secondary"
+              type="button"
+              aria-label="切换主题"
+            >
+              夜间模式
+            </button>
+            <button
+              id="logoutButton"
+              class="button-secondary"
+              aria-label="退出登录"
+            >
+              退出
+            </button>
+          </div>
+        </header>
+        <section
+          id="pageAlert"
+          class="alert hidden"
+          role="alert"
+          aria-live="assertive"
+        ></section>
+        <section
+          id="pageRoot"
+          class="content-grid"
+          aria-live="polite"
+          aria-busy="false"
+        ></section>
+      </section>
+    </main>
+
+    <script type="module" src="/assets/app.js"></script>
+  </body>
 </html>
