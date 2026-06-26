@@ -1,28 +1,160 @@
-﻿import { settingsSummary } from './settings.js';
-import { api, fmtDate, percent } from '../api.js';
+import { settingsSummary } from './settings.js';
+import { api, asList, fmtDate, percent, escapeHTML } from '../api.js';
 
 export const overviewPage = {
   title: '概览',
   eyebrow: '总览',
   async render(ctx) {
     ctx.root.innerHTML = `
-      <section class="card">
-        <div class="card-header">
-          <div><h2>项目概览</h2><p class="muted">快速查看配置、任务和图片状态。</p></div>
-          <button id="openMonitoring" class="button-secondary">查看监测</button>
+      <div class="settings-page-header">
+        <div>
+          <h2>概览</h2>
+          <p class="page-desc">快速查看配置、任务和图片状态</p>
         </div>
-        <div id="overviewRoot" class="metric-grid"></div>
-      </section>`;
-    document.getElementById('openMonitoring').addEventListener('click', () => ctx.navigate('monitoring'));
-    const [monitoring, settings] = await Promise.all([api('/admin/api/monitoring/summary'), settingsSummary()]);
-    document.getElementById('overviewRoot').innerHTML = `
-      <div class="metric"><span>上游接口</span><strong>${settings.endpoint}</strong></div>
-      <div class="metric"><span>默认模型</span><strong>${settings.model}</strong></div>
-      <div class="metric"><span>默认尺寸</span><strong>${settings.size}</strong></div>
-      <div class="metric"><span>任务总数</span><strong>${monitoring.tasks?.total ?? 0}</strong></div>
-      <div class="metric"><span>成功率</span><strong>${percent(monitoring.success_rate?.percentage)}</strong></div>
-      <div class="metric"><span>图片总数</span><strong>${monitoring.images?.total ?? 0}</strong></div>
-      <div class="metric"><span>最近请求</span><strong>${fmtDate(monitoring.tasks?.latest_request)}</strong></div>
-      <div class="metric"><span>服务状态</span><strong>运行中</strong></div>`;
+        <button id="overviewRefresh" class="btn-save">刷新</button>
+      </div>
+      <div id="overviewRoot"><div class="empty">加载中...</div></div>`;
+    document.getElementById('overviewRefresh').addEventListener('click', () => loadOverview(ctx));
+    await loadOverview(ctx);
   }
 };
+
+async function loadOverview(ctx) {
+  const btn = document.getElementById('overviewRefresh');
+  if (btn) { btn.classList.add('saving'); btn.textContent = '刷新中...'; }
+  try {
+    const [monitoring, settings, logs] = await Promise.all([
+      api('/admin/api/monitoring/summary'),
+      settingsSummary(),
+      api('/admin/api/logs').then(asList).catch(() => [])
+    ]);
+    const root = document.getElementById('overviewRoot');
+    if (!root) return;
+
+    // Build KPI cards from real monitoring data
+    const kpis = [];
+    kpis.push({ label: '服务状态', value: '运行中', accent: 'success' });
+    kpis.push({ label: '上游接口', value: settings.endpoint });
+    kpis.push({ label: '默认模型', value: settings.model });
+    kpis.push({ label: '默认尺寸', value: settings.size });
+    kpis.push({ label: '任务总数', value: String(monitoring.tasks?.total ?? 0) });
+    kpis.push({ label: '成功率', value: percent(monitoring.success_rate?.percentage), accent: 'primary' });
+    kpis.push({ label: '图片总数', value: String(monitoring.images?.total ?? 0) });
+    kpis.push({ label: '最近请求', value: fmtDate(monitoring.tasks?.latest_request) });
+
+    // Model statistics from logs
+    const modelStats = computeModelStats(logs);
+
+    // Recent activity from logs (last 5)
+    const recentLogs = logs.slice(0, 5);
+
+    root.innerHTML = `
+      <!-- KPI Grid -->
+      <div class="settings-section">
+        <div class="settings-section-title">核心指标</div>
+        <div class="overview-kpi-grid">
+          ${kpis.map(kpi => kpiCard(kpi)).join('')}
+        </div>
+      </div>
+
+      <!-- Service Status Summary -->
+      <div class="settings-section">
+        <div class="settings-section-title">运行状态摘要</div>
+        <div class="monitor-grid">
+          ${statTile('上游接口', settings.endpoint)}
+          ${statTile('默认模型', settings.model)}
+          ${statTile('默认尺寸', settings.size)}
+          ${statTile('运行时长', formatDuration(monitoring.process?.uptime_seconds))}
+          ${statTile('最近请求', fmtDate(monitoring.tasks?.latest_request))}
+          ${statTile('进行中任务', String(monitoring.tasks?.running ?? 0))}
+        </div>
+      </div>
+
+      <!-- Model Usage Statistics -->
+      <div class="settings-section">
+        <div class="settings-section-title">模型使用统计</div>
+        ${modelStats.length > 0 ? renderModelStats(modelStats, monitoring.tasks?.total || 1) : '<div class="empty-inline">暂无模型统计数据</div>'}
+      </div>
+
+      <!-- Recent Activity -->
+      <div class="settings-section">
+        <div class="settings-section-title">最近活动</div>
+        ${recentLogs.length > 0 ? renderRecentLogs(recentLogs) : '<div class="empty-inline">暂无请求记录</div>'}
+      </div>`;
+  } finally {
+    if (btn) { btn.classList.remove('saving'); btn.textContent = '刷新'; }
+  }
+}
+
+function kpiCard({ label, value, accent = '' }) {
+  const accentClass = accent ? ` kpi-${accent}` : '';
+  return `<div class="kpi-card${accentClass}"><span class="kpi-label">${escapeHTML(label)}</span><span class="kpi-value">${escapeHTML(value)}</span></div>`;
+}
+
+function statTile(label, value) {
+  return `<div class="stat-tile"><span class="stat-label">${escapeHTML(label)}</span><span class="stat-value">${escapeHTML(value)}</span></div>`;
+}
+
+function computeModelStats(logs) {
+  const map = new Map();
+  for (const log of logs) {
+    const modelName = log.UpstreamModelName || log.upstream_model_name || '';
+    const modelIndex = log.ModelIndex ?? log.model_index ?? '';
+    const key = modelName || `sd${modelIndex}`;
+    if (!key || key === 'sd') continue;
+    if (!map.has(key)) {
+      map.set(key, { name: key, modelIndex, count: 0, success: 0 });
+    }
+    const entry = map.get(key);
+    entry.count++;
+    if (log.Success ?? log.success) entry.success++;
+  }
+  return Array.from(map.values()).sort((a, b) => b.count - a.count);
+}
+
+function renderModelStats(stats, total) {
+  const max = stats[0]?.count || 1;
+  return `<div class="model-stats-list">
+    ${stats.map(s => {
+      const pct = total > 0 ? ((s.count / total) * 100).toFixed(1) : '0';
+      const barWidth = Math.max(4, (s.count / max) * 100);
+      return `<div class="model-stat-row">
+        <div class="model-stat-info">
+          <span class="model-stat-name">${escapeHTML(s.name)}</span>
+          <span class="model-stat-count">${s.count} 次 · ${pct}%</span>
+        </div>
+        <div class="model-stat-bar-bg"><div class="model-stat-bar" style="width:${barWidth}%"></div></div>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+function renderRecentLogs(logs) {
+  return `<div class="recent-logs-list">
+    ${logs.map(log => {
+      const ok = log.Success ?? log.success;
+      const time = fmtDate(log.CreatedAt || log.created_at);
+      const model = log.UpstreamModelName || log.upstream_model_name || `sd${log.ModelIndex ?? log.model_index ?? ''}`;
+      const width = log.Width ?? log.width ?? '';
+      const height = log.Height ?? log.height ?? '';
+      const size = width && height ? `${width}×${height}` : '';
+      return `<div class="recent-log-item">
+        <span class="badge ${ok ? 'badge-success' : 'badge-danger'}">${ok ? '成功' : '失败'}</span>
+        <span class="recent-log-model">${escapeHTML(model)}</span>
+        ${size ? `<span class="recent-log-meta">${escapeHTML(size)}</span>` : ''}
+        <span class="recent-log-time">${escapeHTML(time)}</span>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+function formatDuration(seconds = 0) {
+  const value = Number(seconds || 0);
+  const days = Math.floor(value / 86400);
+  const hours = Math.floor((value % 86400) / 3600);
+  const minutes = Math.floor((value % 3600) / 60);
+  if (days) return `${days}d ${hours}h`;
+  if (hours) return `${hours}h ${minutes}m`;
+  if (minutes) return `${minutes}m`;
+  return `${value}s`;
+}
