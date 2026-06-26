@@ -1,0 +1,331 @@
+/* ============================================
+ * layout.css - 布局结构
+ * 应用壳、侧边栏、工作区、顶栏
+ * ============================================ */
+
+/* 应用壳 */
+.app-shell {
+  height: 100vh;
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  background: var(--color-bg);
+}
+
+/* 侧边栏 */
+.sidebar {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 32px;
+  padding: 24px 16px;
+  background: var(--color-surface);
+  border-right: 1px solid var(--border-color);
+}
+
+@supports (backdrop-filter: blur(20px)) {
+  .sidebar {
+    backdrop-filter: blur(20px) saturate(180%);
+    background: rgba(255, 255, 255, 0.85);
+  }
+
+  [data-theme="dark"] .sidebar {
+    background: rgba(26, 29, 39, 0.85);
+  }
+}
+
+/* 侧边栏品牌 */
+.sidebar-brand {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+}
+
+.sidebar-brand .brand-mark,
+.auth-card .brand-mark {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  background: var(--color-primary-soft);
+  border-radius: 12px;
+  color: var(--color-primary);
+  font-weight: 800;
+  font-size: 14px;
+  letter-spacing: 0.02em;
+}
+
+.sidebar-brand strong {
+  display: block;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-main);
+}
+
+.sidebar-brand span {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* 导航列表包裹 */
+.sidebar-nav-wrap {
+  flex: 1;
+  min-height: 0;
+}
+
+/* 侧边栏状态 */
+.sidebar-status {
+  padding: 12px 16px;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-subtle);
+}
+
+.status-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+}
+
+.status-dot.online {
+  background: var(--color-success);
+  box-shadow: 0 0 6px rgba(52, 199, 89, 0.4);
+}
+
+.status-dot.offline {
+  background: var(--color-warning);
+}
+
+/* 导航列表 */
+.nav-list {
+  display: grid;
+  gap: 2px;
+}
+
+.nav-list button {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  border-radius: 10px;
+  padding: 10px 14px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-weight: 500;
+  font-size: 14px;
+  box-shadow: none;
+  transition: all var(--transition);
+}
+
+.nav-list button:hover {
+  background: var(--color-bg-soft);
+  color: var(--text-main);
+  transform: none;
+  box-shadow: none;
+}
+
+.nav-list button.active {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-weight: 600;
+  box-shadow: none;
+  transform: none;
+}
+
+/* 工作区 */
+.workspace {
+  min-width: 0;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 32px 40px 48px;
+  scroll-behavior: smooth;
+}
+
+/* 顶栏 */
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 24px;
+  margin-bottom: 32px;
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-main);
+}
+
+.topbar .eyebrow {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+}
+
+.topbar-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* 内容网格 */
+.content-grid {
+  display: grid;
+  gap: 24px;
+  animation: page-in var(--transition-slow) both;
+}
+
+/* 登录布局 */
+.auth-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: max(28px, env(safe-area-inset-top))
+    max(20px, env(safe-area-inset-right)) max(28px, env(safe-area-inset-bottom))
+    max(20px, env(safe-area-inset-left));
+}
+
+.auth-card {
+  width: min(100%, 400px);
+  display: grid;
+  gap: 20px;
+  padding: 40px 0;
+}
+
+.auth-card h1 {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.auth-card .eyebrow {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+}
+
+.auth-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+/* ============================================
+ * 响应式 - 平板 (<=980px)
+ * ============================================ */
+@media (max-width: 980px) {
+  body {
+    overflow: auto;
+  }
+
+  .app-shell {
+    min-height: 100vh;
+    height: auto;
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    height: auto;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 16px;
+    padding: 14px max(14px, env(safe-area-inset-right)) 12px
+      max(14px, env(safe-area-inset-left));
+    backdrop-filter: blur(20px) saturate(180%);
+    background: rgba(255, 255, 255, 0.9);
+  }
+
+  [data-theme="dark"] .sidebar {
+    background: rgba(26, 29, 39, 0.9);
+  }
+
+  .sidebar-brand {
+    display: none;
+  }
+
+  .sidebar-status {
+    display: none;
+  }
+
+  .sidebar-nav-wrap {
+    flex: none;
+  }
+
+  .nav-list {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .nav-list::-webkit-scrollbar {
+    display: none;
+  }
+
+  .nav-list button {
+    width: auto;
+    min-width: max-content;
+    padding: 10px 16px;
+    white-space: nowrap;
+  }
+
+  .workspace {
+    height: auto;
+    overflow: visible;
+    padding: 24px 20px 40px;
+  }
+
+  .topbar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+  }
+
+  .topbar-actions {
+    width: 100%;
+    justify-content: flex-start;
+    gap: 12px;
+  }
+}
+
+/* ============================================
+ * 响应式 - 手机 (<=640px)
+ * ============================================ */
+@media (max-width: 640px) {
+  .workspace {
+    padding: 20px max(16px, env(safe-area-inset-right))
+      max(32px, env(safe-area-inset-bottom))
+      max(16px, env(safe-area-inset-left));
+  }
+
+  .auth-card {
+    padding: 30px 0;
+  }
+
+  .nav-list button {
+    padding: 8px 12px;
+    font-size: 13px;
+  }
+}

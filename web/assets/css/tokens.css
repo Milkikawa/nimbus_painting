@@ -1,0 +1,65 @@
+/* ============================================
+ * tokens.css - 设计系统变量
+ * 所有颜色、间距、圆角、阴影、过渡的统一定义
+ * ============================================ */
+
+:root {
+  /* 颜色系统 - Light */
+  --color-bg: #f8f9fb;
+  --color-bg-soft: #f5f7fb;
+  --color-surface: #ffffff;
+  --color-surface-subtle: #f3f4f8;
+  --text-main: #111827;
+  --text-secondary: #6b7280;
+  --text-tertiary: #9ca3af;
+  --border-color: rgba(17, 24, 39, 0.08);
+  --border-strong: rgba(17, 24, 39, 0.12);
+
+  --color-primary: #3478f6;
+  --color-primary-soft: rgba(52, 120, 246, 0.10);
+  --color-primary-strong: #1f63e9;
+
+  --color-success: #34c759;
+  --color-success-soft: rgba(52, 199, 89, 0.12);
+  --color-warning: #ff9500;
+  --color-warning-soft: rgba(255, 149, 0, 0.14);
+  --color-danger: #ff3b30;
+  --color-danger-soft: rgba(255, 59, 48, 0.12);
+  --color-purple: #8b5cf6;
+  --color-purple-soft: rgba(139, 92, 246, 0.12);
+
+  /* 字体 */
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "SF Mono", "Cascadia Code", "JetBrains Mono", "Menlo", "Consolas", monospace;
+
+  /* 间距 - 8px 基数 */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 12px;
+  --spacing-lg: 16px;
+  --spacing-xl: 24px;
+  --spacing-2xl: 32px;
+  --spacing-3xl: 48px;
+
+  /* 圆角 */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-pill: 999px;
+
+  /* 阴影 - 轻柔扩散 */
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04), 0 12px 32px rgba(15, 23, 42, 0.06);
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.03), 0 4px 12px rgba(15, 23, 42, 0.04);
+  --shadow-floating: 0 20px 60px rgba(15, 23, 42, 0.12);
+
+  /* 过渡 */
+  --transition-fast: 150ms cubic-bezier(0.25, 0.1, 0.25, 1);
+  --transition: 250ms cubic-bezier(0.25, 0.1, 0.25, 1);
+  --transition-slow: 400ms cubic-bezier(0.25, 0.1, 0.25, 1);
+  --spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* 布局 */
+  --sidebar-width: 256px;
+  --touch-target: 44px;
+}
