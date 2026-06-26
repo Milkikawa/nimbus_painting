@@ -1,105 +1,231 @@
 import { api, asList, escapeHTML, fmtDate, safeURL } from "../api.js";
 
 let activeLogs = [];
+let activeIndex = -1;
 
 export const logsPage = {
   title: "请求日志",
   eyebrow: "请求审计",
   cleanup() {
-    closeLogSheet();
+    closeDrawer();
     activeLogs = [];
+    activeIndex = -1;
   },
   async render(ctx) {
     ctx.root.innerHTML = `
-      <section class="card">
-        <div class="card-header">
-          <div><h2>请求日志</h2><p class="muted">默认只显示摘要；完整 Prompt、请求体和响应体通过详情抽屉查看，避免窄屏长文本换行挤压。</p></div>
-          <button id="reloadLogs" class="button-secondary">刷新</button>
+      <div class="settings-page-header">
+        <div>
+          <h2>请求日志</h2>
+          <p class="page-desc">查看中间件截流到的请求详情与生成结果</p>
         </div>
-        <div id="logsRoot"></div>
-      </section>`;
-    document
-      .getElementById("reloadLogs")
-      .addEventListener("click", () => loadLogs(ctx));
+        <div class="log-toolbar">
+          <select id="logFilter" class="log-filter-select">
+            <option value="all">全部</option>
+            <option value="success">成功</option>
+            <option value="failed">失败</option>
+          </select>
+          <button id="reloadLogs" class="btn-save">刷新</button>
+        </div>
+      </div>
+      <div class="log-layout">
+        <div class="log-list-panel" id="logListPanel">
+          <div class="empty-inline">加载中...</div>
+        </div>
+        <div class="log-detail-panel hidden" id="logDetailPanel">
+          <div class="log-detail-content" id="logDetailContent"></div>
+        </div>
+      </div>`;
+    document.getElementById("reloadLogs").addEventListener("click", () => loadLogs(ctx));
+    document.getElementById("logFilter").addEventListener("change", () => renderFilteredList(ctx));
     await loadLogs(ctx);
   },
 };
 
 async function loadLogs(ctx) {
-  const list = asList(await api("/admin/api/logs")).map(normalizeLog);
-  const root = document.getElementById("logsRoot");
-  activeLogs = list;
-  if (!list.length) {
-    root.innerHTML = '<div class="empty">暂无请求日志</div>';
+  const btn = document.getElementById("reloadLogs");
+  if (btn) { btn.classList.add("saving"); btn.textContent = "刷新中..."; }
+  try {
+    const list = asList(await api("/admin/api/logs")).map(normalizeLog);
+    activeLogs = list;
+    activeIndex = -1;
+    renderFilteredList(ctx);
+  } finally {
+    if (btn) { btn.classList.remove("saving"); btn.textContent = "刷新"; }
+  }
+}
+
+function renderFilteredList(ctx) {
+  const filter = document.getElementById("logFilter")?.value || "all";
+  let filtered = activeLogs;
+  if (filter === "success") filtered = activeLogs.filter(l => l.ok);
+  if (filter === "failed") filtered = activeLogs.filter(l => !l.ok);
+
+  const panel = document.getElementById("logListPanel");
+  if (!panel) return;
+
+  if (!filtered.length) {
+    panel.innerHTML = '<div class="empty-inline">暂无请求日志</div>';
+    closeDrawer();
     return;
   }
-  root.innerHTML = `${renderTable(list)}${renderCards(list)}`;
-  root.querySelectorAll("[data-log-detail]").forEach((button) => {
-    button.addEventListener("click", () =>
-      openLogSheet(Number(button.dataset.logDetail))
-    );
+
+  panel.innerHTML = filtered.map((log, idx) => {
+    const realIdx = activeLogs.indexOf(log);
+    return `<div class="log-list-item ${realIdx === activeIndex ? 'active' : ''}" data-log-idx="${realIdx}">
+      <div class="log-item-left">
+        <span class="badge ${log.ok ? 'badge-success' : 'badge-danger'}">${log.ok ? '成功' : '失败'}</span>
+        <span class="log-item-model">${escapeHTML(log.upstreamModelName !== '—' ? log.upstreamModelName : 'sd' + log.modelIndex)}</span>
+      </div>
+      <div class="log-item-right">
+        <span class="log-item-meta">${escapeHTML(log.size)}</span>
+        <span class="log-item-time">${escapeHTML(log.createdAt)}</span>
+      </div>
+    </div>`;
+  }).join("");
+
+  panel.querySelectorAll("[data-log-idx]").forEach(item => {
+    item.addEventListener("click", () => {
+      const idx = Number(item.dataset.logIdx);
+      openDrawer(idx, ctx);
+    });
   });
 }
 
-function renderTable(list) {
-  return `<div class="table-wrap logs-table"><table><thead><tr><th>时间</th><th>结果</th><th>模型</th><th>生图参数</th><th>提示词摘要</th><th>上游摘要</th><th>详情</th></tr></thead><tbody>${list
-    .map(
-      (data, index) => `
-    <tr>
-      <td class="nowrap">${escapeHTML(data.createdAt)}</td>
-      <td>${statusBadge(data.ok)}</td>
-      <td class="nowrap">sd${escapeHTML(
-        data.modelIndex
-      )}<br><span class="muted">${escapeHTML(
-        data.upstreamModelName
-      )}</span></td>
-      <td class="nowrap">${escapeHTML(
-        data.size
-      )}<br><span class="muted">steps ${escapeHTML(
-        data.steps
-      )} / cfg ${escapeHTML(
-        data.cfg
-      )}</span><br><span class="muted">seed ${escapeHTML(data.seed)}</span></td>
-      <td><div class="log-summary">${escapeHTML(
-        summary(data.finalPrompt || data.rawPrompt)
-      )}</div></td>
-      <td><div class="log-summary ${
-        data.errorMessage ? "error-text" : ""
-      }">${escapeHTML(
-        summary(
-          data.errorMessage || data.upstreamResponseBody || data.pointsText
-        )
-      )}</div></td>
-      <td><button class="detail-button" type="button" data-log-detail="${index}">查看完整</button></td>
-    </tr>`
-    )
-    .join("")}</tbody></table></div>`;
+function openDrawer(idx, ctx) {
+  const log = activeLogs[idx];
+  if (!log) return;
+  activeIndex = idx;
+
+  // Highlight active item
+  document.querySelectorAll(".log-list-item").forEach(el => {
+    el.classList.toggle("active", Number(el.dataset.logIdx) === idx);
+  });
+
+  const detailPanel = document.getElementById("logDetailPanel");
+  const detailContent = document.getElementById("logDetailContent");
+  detailPanel.classList.remove("hidden");
+
+  detailContent.innerHTML = `
+    <div class="log-detail-header">
+      <div>
+        <strong>请求详情</strong>
+        <span class="badge ${log.ok ? 'badge-success' : 'badge-danger'}">${log.ok ? '成功' : '失败'}</span>
+      </div>
+      <button class="button-secondary" id="closeDrawer" type="button">关闭</button>
+    </div>
+
+    <!-- Section A: Images -->
+    ${renderImages(log)}
+
+    <!-- Section B: Core Parameters -->
+    <div class="log-detail-section">
+      <div class="log-detail-section-title">核心参数</div>
+      <div class="log-params-grid">
+        ${paramTile('模型', log.upstreamModelName !== '—' ? log.upstreamModelName : 'sd' + log.modelIndex)}
+        ${paramTile('模型编号', 'sd' + log.modelIndex)}
+        ${paramTile('尺寸', log.size)}
+        ${paramTile('步数', log.steps)}
+        ${paramTile('CFG', log.cfg)}
+        ${paramTile('种子', log.seed)}
+        ${paramTile('耗时', log.duration || '—')}
+        ${paramTile('积分消耗', log.pointsUsed)}
+        ${paramTile('剩余积分', log.remainingPoints)}
+        ${paramTile('默认提示词', log.defaultPromptAppended ? '已附加' : '未附加')}
+        ${paramTile('图片数量', log.imageCount || '1')}
+        ${paramTile('请求时间', log.createdAt)}
+      </div>
+    </div>
+
+    <!-- Section C: Prompt Results -->
+    <div class="log-detail-section">
+      <div class="log-detail-section-title">提示词处理结果</div>
+      ${promptBlock('原始提示词', log.rawPrompt)}
+      ${promptBlock('最终正面提示词', log.finalPrompt)}
+      ${promptBlock('负面提示词', log.negativePrompt)}
+    </div>
+
+    <!-- Section D: Raw JSON (collapsible) -->
+    <div class="log-detail-section">
+      <details class="log-json-details">
+        <summary class="log-detail-section-title clickable">原始请求 / 响应 JSON ▾</summary>
+        <div class="log-json-tabs">
+          ${log.upstreamRequestBody ? jsonBlock('上游请求体', log.upstreamRequestBody) : ''}
+          ${log.upstreamResponseBody ? jsonBlock('上游响应体', log.upstreamResponseBody) : ''}
+        </div>
+      </details>
+    </div>
+
+    <!-- Section E: Meta Info -->
+    <div class="log-detail-section">
+      <div class="log-detail-section-title">请求元信息</div>
+      <div class="log-params-grid">
+        ${paramTile('上游状态码', log.upstreamStatus)}
+        ${paramTile('状态', log.ok ? '成功' : '失败')}
+        ${paramTile('图片返回方式', log.imageReturnMode || '—')}
+        ${log.imageSaveError ? paramTile('图片保存错误', log.imageSaveError) : ''}
+      </div>
+      ${log.errorMessage ? `<div class="log-error-block"><span class="badge-danger">错误</span><pre class="log-error-text">${escapeHTML(log.errorMessage)}</pre></div>` : ''}
+    </div>`;
+
+  detailContent.querySelector("#closeDrawer")?.addEventListener("click", () => closeDrawer());
+
+  // Copy buttons
+  detailContent.querySelectorAll("[data-copy-prompt]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const text = btn.dataset.copyPrompt;
+      navigator.clipboard.writeText(text).then(() => ctx.toast("已复制", "success")).catch(() => {});
+    });
+  });
 }
 
-function renderCards(list) {
-  return `<div class="log-cards">${list
-    .map(
-      (data, index) => `
-    <article class="log-card">
-      <div class="log-card-head">
-        <div>
-          <strong>${escapeHTML(data.createdAt)}</strong>
-          <span class="muted">sd${escapeHTML(data.modelIndex)} · ${escapeHTML(
-        data.size
-      )} · seed ${escapeHTML(data.seed)}</span>
-        </div>
-        ${statusBadge(data.ok)}
-      </div>
-      ${summaryBlock("提示词摘要", data.finalPrompt || data.rawPrompt)}
-      ${summaryBlock(
-        "上游摘要",
-        data.errorMessage || data.upstreamResponseBody || data.pointsText,
-        data.errorMessage ? "error-text" : ""
-      )}
-      <button class="detail-button" type="button" data-log-detail="${index}">展开完整请求与响应</button>
-    </article>`
-    )
-    .join("")}</div>`;
+function closeDrawer() {
+  const panel = document.getElementById("logDetailPanel");
+  if (panel) panel.classList.add("hidden");
+  activeIndex = -1;
+  document.querySelectorAll(".log-list-item.active").forEach(el => el.classList.remove("active"));
+}
+
+function renderImages(log) {
+  const urls = [];
+  if (log.downstreamImageURL) urls.push(log.downstreamImageURL);
+  if (log.upstreamImageURL && log.upstreamImageURL !== log.downstreamImageURL) urls.push(log.upstreamImageURL);
+
+  if (!urls.length) {
+    return `<div class="log-detail-section"><div class="log-detail-section-title">生成图片</div><div class="empty-inline">该请求暂无截流图片</div></div>`;
+  }
+
+  return `<div class="log-detail-section">
+    <div class="log-detail-section-title">生成图片</div>
+    <div class="log-image-grid">
+      ${urls.map(url => {
+        const safe = safeURL(url);
+        return safe ? `<a href="${escapeHTML(safe)}" target="_blank" rel="noreferrer" class="log-image-thumb"><img src="${escapeHTML(safe)}" alt="生成图片" loading="lazy"></a>` : '';
+      }).join("")}
+    </div>
+  </div>`;
+}
+
+function paramTile(label, value) {
+  return `<div class="log-param-tile"><span class="log-param-label">${escapeHTML(label)}</span><span class="log-param-value">${escapeHTML(String(value ?? '—'))}</span></div>`;
+}
+
+function promptBlock(title, content) {
+  if (!content) return `<div class="log-prompt-block"><div class="log-prompt-title">${escapeHTML(title)}</div><div class="log-prompt-empty">无</div></div>`;
+  const charCount = content.length;
+  return `<div class="log-prompt-block">
+    <div class="log-prompt-header">
+      <span class="log-prompt-title">${escapeHTML(title)} <span class="log-prompt-count">${charCount} 字符</span></span>
+      <button class="button-secondary prompt-card-btn" data-copy-prompt="${escapeHTML(content)}">复制</button>
+    </div>
+    <pre class="log-prompt-text">${escapeHTML(content)}</pre>
+  </div>`;
+}
+
+function jsonBlock(title, content) {
+  return `<div class="log-json-block">
+    <div class="log-json-title">${escapeHTML(title)}</div>
+    <pre class="log-json-text">${escapeHTML(content)}</pre>
+  </div>`;
 }
 
 function normalizeLog(log) {
@@ -117,117 +243,20 @@ function normalizeLog(log) {
     finalPrompt: log.FinalPrompt ?? log.final_prompt ?? "",
     negativePrompt: log.NegativePrompt ?? log.negative_prompt ?? "",
     upstreamStatus: log.UpstreamStatus ?? log.upstream_status ?? "—",
-    upstreamRequestBody: prettyJSON(
-      log.UpstreamRequestBody ?? log.upstream_request_body ?? ""
-    ),
-    upstreamResponseBody: prettyJSON(
-      log.UpstreamResponseBody ?? log.upstream_response_body ?? ""
-    ),
+    upstreamRequestBody: prettyJSON(log.UpstreamRequestBody ?? log.upstream_request_body ?? ""),
+    upstreamResponseBody: prettyJSON(log.UpstreamResponseBody ?? log.upstream_response_body ?? ""),
     upstreamImageURL: log.UpstreamImageURL ?? log.upstream_image_url ?? "",
     upstreamModelName: log.UpstreamModelName ?? log.upstream_model_name ?? "—",
-    pointsText: `消耗 ${log.PointsUsed ?? log.points_used ?? 0} / 剩余 ${
-      log.RemainingPoints ?? log.remaining_points ?? 0
-    }`,
-    downstreamImageURL:
-      log.DownstreamImageURL ?? log.downstream_image_url ?? "",
+    pointsUsed: log.PointsUsed ?? log.points_used ?? 0,
+    remainingPoints: log.RemainingPoints ?? log.remaining_points ?? 0,
+    downstreamImageURL: log.DownstreamImageURL ?? log.downstream_image_url ?? "",
     imageSaveError: log.ImageSaveError ?? log.image_save_error ?? "",
     errorMessage: log.ErrorMessage ?? log.error_message ?? "",
+    imageReturnMode: log.ImageReturnMode ?? log.image_return_mode ?? "",
+    imageCount: log.ImageCount ?? log.image_count ?? "",
+    duration: log.Duration ?? log.duration ?? "",
+    defaultPromptAppended: log.DefaultPromptAppended ?? log.default_prompt_appended ?? false,
   };
-}
-
-function openLogSheet(index) {
-  const data = activeLogs[index];
-  if (!data) return;
-  closeLogSheet();
-  const sheet = document.createElement("section");
-  sheet.className = "log-sheet";
-  sheet.setAttribute("role", "dialog");
-  sheet.setAttribute("aria-modal", "true");
-  sheet.innerHTML = `
-    <div class="log-sheet-panel">
-      <div class="log-sheet-head">
-        <div>
-          <strong>${escapeHTML(data.createdAt)}</strong>
-          <div class="muted">sd${escapeHTML(data.modelIndex)} · ${escapeHTML(
-    data.size
-  )} · ${data.ok ? "成功" : "失败"}</div>
-        </div>
-        <button class="button-secondary" type="button" data-close-log>关闭</button>
-      </div>
-      <div class="log-sheet-body">
-        ${detailBlock("用户输入", data.rawPrompt)}
-        ${detailBlock("最终正面提示词", data.finalPrompt)}
-        ${
-          data.negativePrompt
-            ? detailBlock("负面提示词", data.negativePrompt)
-            : ""
-        }
-        ${detailBlock("实际上游请求体", data.upstreamRequestBody)}
-        ${detailBlock("上游原始响应体", data.upstreamResponseBody)}
-        ${detailBlock("点数信息", data.pointsText)}
-        ${detailLink("下游返回图片", data.downstreamImageURL)}
-        ${detailLink("上游原图", data.upstreamImageURL)}
-        ${
-          data.imageSaveError
-            ? detailBlock("本地保存错误", data.imageSaveError, "error-text")
-            : ""
-        }
-        ${
-          data.errorMessage
-            ? detailBlock("错误", data.errorMessage, "error-text")
-            : ""
-        }
-      </div>
-    </div>`;
-  sheet.addEventListener("click", (event) => {
-    if (event.target === sheet || event.target.closest("[data-close-log]"))
-      closeLogSheet();
-  });
-  document.addEventListener("keydown", closeOnEscape);
-  document.body.appendChild(sheet);
-}
-
-function closeLogSheet() {
-  document.querySelector(".log-sheet")?.remove();
-  document.removeEventListener("keydown", closeOnEscape);
-}
-
-function closeOnEscape(event) {
-  if (event.key === "Escape") closeLogSheet();
-}
-
-function statusBadge(ok) {
-  return `<span class="badge ${ok ? "ok" : "fail"}">${
-    ok ? "成功" : "失败"
-  }</span>`;
-}
-
-function summaryBlock(label, value, extraClass = "") {
-  return `<section class="log-block"><span>${label}</span><div class="log-summary ${extraClass}">${escapeHTML(
-    summary(value)
-  )}</div></section>`;
-}
-
-function detailBlock(label, value, extraClass = "") {
-  return `<section class="log-block"><span>${label}</span><pre class="${extraClass}">${escapeHTML(
-    value || "—"
-  )}</pre></section>`;
-}
-
-function detailLink(label, value) {
-  if (!value) return detailBlock(label, "—");
-  const url = safeURL(value);
-  if (!url) return detailBlock(label, "链接无效");
-  return `<section class="log-block"><span>${label}</span><a href="${escapeHTML(
-    url
-  )}" target="_blank" rel="noreferrer">${escapeHTML(url)}</a></section>`;
-}
-
-function summary(value) {
-  const compact = String(value || "—")
-    .replace(/\s+/g, " ")
-    .trim();
-  return compact.length > 120 ? `${compact.slice(0, 120)}…` : compact;
 }
 
 function prettyJSON(value) {
