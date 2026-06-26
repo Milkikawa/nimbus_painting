@@ -7,7 +7,12 @@
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
     />
     <title>Nimbus 绘图转发后台</title>
-    <link rel="stylesheet" href="/assets/app.css" />
+    <link rel="stylesheet" href="/assets/css/tokens.css" />
+    <link rel="stylesheet" href="/assets/css/dark.css" />
+    <link rel="stylesheet" href="/assets/css/base.css" />
+    <link rel="stylesheet" href="/assets/css/layout.css" />
+    <link rel="stylesheet" href="/assets/css/components.css" />
+    <link rel="stylesheet" href="/assets/css/pages.css" />
   </head>
   <body>
     <a href="#pageRoot" class="skip-link">跳转到主内容</a>
@@ -52,14 +57,22 @@
             <span>管理后台</span>
           </div>
         </div>
-        <nav class="nav-list" aria-label="主导航">
-          <button data-view="overview">概览</button>
-          <button data-view="monitoring">项目监测</button>
-          <button data-view="settings">基础设置</button>
-          <button data-view="prompts">提示词组</button>
-          <button data-view="images">图片管理</button>
-          <button data-view="logs">请求日志</button>
-        </nav>
+        <div class="sidebar-nav-wrap">
+          <nav class="nav-list" aria-label="主导航">
+            <button data-view="overview">概览</button>
+            <button data-view="monitoring">项目监测</button>
+            <button data-view="settings">基础设置</button>
+            <button data-view="prompts">提示词组</button>
+            <button data-view="images">图片管理</button>
+            <button data-view="logs">请求日志</button>
+          </nav>
+        </div>
+        <div class="sidebar-status">
+          <div class="status-indicator">
+            <span class="status-dot" id="sidebarStatusDot"></span>
+            <span id="sidebarStatusText">检查中...</span>
+          </div>
+        </div>
       </aside>
 
       <section class="workspace" role="region" aria-label="主工作区">
@@ -78,7 +91,7 @@
               type="button"
               aria-label="切换主题"
             >
-              夜间模式
+              浅色模式
             </button>
             <button
               id="logoutButton"

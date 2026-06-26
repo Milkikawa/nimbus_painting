@@ -7,31 +7,168 @@ export const settingsPage = {
   eyebrow: '配置',
   async render(ctx) {
     ctx.root.innerHTML = `
-      <section class="card">
-        <div class="card-header"><div><h2>基础参数</h2><p class="muted">配置上游接口、默认生成参数和图片保存目录。</p></div><button id="saveSettings">保存设置</button></div>
-        <div class="grid">
-          <label class="field"><span>上游完整接口</span><input id="upstream_endpoint" placeholder="https://example.com/full/path"></label>
-          <label class="field"><span>默认模型编号</span><input id="default_model_index" inputmode="numeric"></label>
-          <label class="field"><span>默认宽度</span><input id="default_width" inputmode="numeric"></label>
-          <label class="field"><span>默认高度</span><input id="default_height" inputmode="numeric"></label>
-          <label class="field"><span>采样步数</span><input id="default_steps" inputmode="numeric"></label>
-          <label class="field"><span>CFG</span><input id="default_cfg" inputmode="decimal"></label>
-          <label class="field"><span>最小尺寸</span><input id="min_dimension" inputmode="numeric"></label>
-          <label class="field"><span>最大尺寸</span><input id="max_dimension" inputmode="numeric"></label>
-          <label class="field"><span>请求超时秒</span><input id="request_timeout_seconds" inputmode="numeric"></label>
-          <label class="field"><span>图片保存目录</span><input id="image_save_dir"></label>
-          <label class="field"><span>正面提示词组</span><select id="selected_positive_group_id"></select></label>
-          <label class="field"><span>负面提示词组</span><select id="selected_negative_group_id"></select></label>
+      <div class="settings-page-header">
+        <div>
+          <h2>基础设置</h2>
+          <p class="page-desc">配置上游接口、默认生成参数和图片保存目录</p>
         </div>
-      </section>`;
-    await loadSettingsForm(ctx);
-    document.getElementById('saveSettings').addEventListener('click', async () => {
-      const body = {};
-      settingIds.forEach((id) => { body[id] = document.getElementById(id).value; });
-      await api('/admin/api/settings', { method: 'PUT', body: JSON.stringify(body) });
-      ctx.toast('设置已保存', 'success');
-      ctx.refreshStatus();
+        <button id="saveSettings" class="btn-save">保存设置</button>
+      </div>
+
+      <!-- Section 1: 上游与模型 -->
+      <div class="settings-section">
+        <div class="settings-section-title">上游与模型</div>
+        <div class="settings-row">
+          <div class="settings-row-label">
+            <div class="label-main">上游完整接口</div>
+            <div class="label-desc">转发绘图请求的真实上游 API 地址</div>
+          </div>
+          <div class="settings-row-input">
+            <input id="upstream_endpoint" placeholder="https://example.com/full/path">
+          </div>
+        </div>
+        <div class="settings-row">
+          <div class="settings-row-label">
+            <div class="label-main">默认模型编号</div>
+            <div class="label-desc">请求未指定模型时使用的默认模型</div>
+          </div>
+          <div class="settings-row-input">
+            <input id="default_model_index" inputmode="numeric" placeholder="4">
+          </div>
+        </div>
+        <div class="settings-row">
+          <div class="settings-row-label">
+            <div class="label-main">请求超时秒数</div>
+            <div class="label-desc">调用上游时的最大等待时间</div>
+          </div>
+          <div class="settings-row-input">
+            <input id="request_timeout_seconds" inputmode="numeric" placeholder="120">
+          </div>
+        </div>
+      </div>
+
+      <!-- Section 2: 默认生成参数 -->
+      <div class="settings-section">
+        <div class="settings-section-title">默认生成参数</div>
+        <div class="settings-grid-2col">
+          <div class="settings-row">
+            <div class="settings-row-label">
+              <div class="label-main">默认宽度</div>
+            </div>
+            <div class="settings-row-input">
+              <input id="default_width" inputmode="numeric" placeholder="832">
+            </div>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-label">
+              <div class="label-main">默认高度</div>
+            </div>
+            <div class="settings-row-input">
+              <input id="default_height" inputmode="numeric" placeholder="1216">
+            </div>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-label">
+              <div class="label-main">采样步数</div>
+            </div>
+            <div class="settings-row-input">
+              <input id="default_steps" inputmode="numeric" placeholder="20">
+            </div>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-label">
+              <div class="label-main">CFG</div>
+            </div>
+            <div class="settings-row-input">
+              <input id="default_cfg" inputmode="decimal" placeholder="7">
+            </div>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-label">
+              <div class="label-main">最小尺寸</div>
+            </div>
+            <div class="settings-row-input">
+              <input id="min_dimension" inputmode="numeric" placeholder="64">
+            </div>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-label">
+              <div class="label-main">最大尺寸</div>
+            </div>
+            <div class="settings-row-input">
+              <input id="max_dimension" inputmode="numeric" placeholder="2048">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section 3: 提示词与图片保存 -->
+      <div class="settings-section">
+        <div class="settings-section-title">提示词与图片保存</div>
+        <div class="settings-row">
+          <div class="settings-row-label">
+            <div class="label-main">图片保存目录</div>
+            <div class="label-desc">本地图片归档的文件系统路径</div>
+          </div>
+          <div class="settings-row-input">
+            <input id="image_save_dir" placeholder="images">
+          </div>
+        </div>
+        <div class="settings-row">
+          <div class="settings-row-label">
+            <div class="label-main">默认正面提示词组</div>
+            <div class="label-desc">请求时自动追加的正面提示词</div>
+          </div>
+          <div class="settings-row-input">
+            <select id="selected_positive_group_id"></select>
+          </div>
+        </div>
+        <div class="settings-row">
+          <div class="settings-row-label">
+            <div class="label-main">默认负面提示词组</div>
+            <div class="label-desc">请求时自动追加的负面提示词</div>
+          </div>
+          <div class="settings-row-input">
+            <select id="selected_negative_group_id"></select>
+          </div>
+        </div>
+      </div>`;
+
+    const saveBtn = document.getElementById('saveSettings');
+    let dirty = false;
+
+    // Mark dirty on any input change
+    settingIds.forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('input', () => {
+        if (!dirty) {
+          dirty = true;
+          saveBtn.classList.add('dirty');
+        }
+      });
     });
+
+    // Save handler
+    saveBtn.addEventListener('click', async () => {
+      saveBtn.classList.add('saving');
+      saveBtn.textContent = '保存中...';
+      try {
+        const body = {};
+        settingIds.forEach((id) => { body[id] = document.getElementById(id).value; });
+        await api('/admin/api/settings', { method: 'PUT', body: JSON.stringify(body) });
+        ctx.toast('设置已保存', 'success');
+        ctx.refreshStatus();
+        dirty = false;
+        saveBtn.classList.remove('dirty');
+      } catch (error) {
+        ctx.toast(error.message || '保存失败', 'error');
+      } finally {
+        saveBtn.classList.remove('saving');
+        saveBtn.textContent = '保存设置';
+      }
+    });
+
+    await loadSettingsForm(ctx);
   }
 };
 

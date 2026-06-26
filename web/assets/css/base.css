@@ -1,0 +1,115 @@
+/* ============================================
+ * base.css - 重置 + 基础元素样式
+ * ============================================ */
+
+/* 全局盒模型 */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* iOS 触控高亮移除 */
+button,
+a,
+.nav-list button,
+.detail-button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 中文长文本优化 */
+p,
+span,
+div {
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+html {
+  height: 100%;
+  color-scheme: light dark;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  min-height: 100%;
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--text-main);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  overflow: hidden;
+  transition: background-color var(--transition-slow), color var(--transition-slow);
+}
+
+/* 表单元素继承字体 */
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+input,
+textarea {
+  -webkit-touch-callout: default;
+}
+
+/* 链接 */
+a {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--color-primary-strong);
+}
+
+/* 无障碍：跳过导航链接 */
+.skip-link {
+  position: absolute;
+  top: -40px;
+  left: 0;
+  background: var(--color-primary);
+  color: #ffffff;
+  padding: 8px 16px;
+  text-decoration: none;
+  border-radius: 0 0 var(--radius-sm) 0;
+  z-index: 100;
+  transition: top var(--transition-fast);
+}
+
+.skip-link:focus {
+  top: 0;
+}
+
+/* 工具类 */
+.hidden {
+  display: none !important;
+}
+
+.muted {
+  color: var(--text-secondary);
+}
+
+.message {
+  min-height: 20px;
+  color: var(--color-danger);
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+/* 减少动画偏好 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

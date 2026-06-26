@@ -1,70 +1,193 @@
-﻿import { api, asList, escapeHTML } from '../api.js';
+import { api, asList, escapeHTML } from '../api.js';
 
 export const promptsPage = {
   title: '提示词组',
   eyebrow: 'Prompt Groups',
   async render(ctx) {
     ctx.root.innerHTML = `
-      <section class="split">
-        <form id="groupForm" class="card">
-          <h2>编辑提示词组</h2>
-          <input id="group_id" type="hidden">
-          <label class="field"><span>组名</span><input id="group_name" required></label>
-          <label class="field"><span>类型</span><select id="group_type"><option value="positive">正面</option><option value="negative">负面</option></select></label>
-          <label class="field"><span>备注</span><input id="group_remark"></label>
-          <label class="field"><span>内容</span><textarea id="group_content" placeholder="tag1, tag2, tag3" required></textarea></label>
-          <div class="form-actions"><button type="submit">保存</button><button type="button" class="button-secondary" id="resetGroup">清空</button></div>
-        </form>
-        <section class="card">
-          <div class="card-header"><div><h2>预设列表</h2><p class="muted">正面和负面提示词组统一管理。</p></div><button id="reloadGroups" class="button-secondary">刷新</button></div>
-          <div id="groupsTable"></div>
-        </section>
-      </section>`;
+      <div class="settings-page-header">
+        <div>
+          <h2>提示词组</h2>
+          <p class="page-desc">管理请求中自动拼接的正面与负面提示词组</p>
+        </div>
+        <div class="prompt-header-actions">
+          <button id="addPositiveGroup" class="btn-save">新增正面组</button>
+          <button id="addNegativeGroup" class="button-secondary">新增负面组</button>
+        </div>
+      </div>
+      <div class="prompt-columns" id="promptsRoot">
+        <div class="prompt-col">
+          <div class="settings-section">
+            <div class="settings-section-title">正面提示词</div>
+            <div id="positiveList"><div class="empty-inline">加载中...</div></div>
+          </div>
+        </div>
+        <div class="prompt-col">
+          <div class="settings-section">
+            <div class="settings-section-title">负面提示词</div>
+            <div id="negativeList"><div class="empty-inline">加载中...</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Edit Modal -->
+      <div id="promptModal" class="prompt-modal hidden">
+        <div class="prompt-modal-backdrop"></div>
+        <div class="prompt-modal-panel">
+          <div class="prompt-modal-header">
+            <h3 id="modalTitle">编辑提示词组</h3>
+            <button class="button-secondary" id="closeModal" type="button">关闭</button>
+          </div>
+          <form id="groupForm" class="prompt-modal-body">
+            <input id="group_id" type="hidden">
+            <div class="settings-row">
+              <div class="settings-row-label"><span class="label-main">组名</span></div>
+              <div class="settings-row-input"><input id="group_name" required placeholder="提示词组名称"></div>
+            </div>
+            <div class="settings-row">
+              <div class="settings-row-label"><span class="label-main">类型</span></div>
+              <div class="settings-row-input">
+                <select id="group_type">
+                  <option value="positive">正面</option>
+                  <option value="negative">负面</option>
+                </select>
+              </div>
+            </div>
+            <div class="settings-row">
+              <div class="settings-row-label"><span class="label-main">备注</span></div>
+              <div class="settings-row-input"><input id="group_remark" placeholder="可选备注"></div>
+            </div>
+            <div class="prompt-content-field">
+              <label class="label-main">内容</label>
+              <textarea id="group_content" placeholder="tag1, tag2, tag3..." required></textarea>
+            </div>
+            <div class="prompt-modal-actions">
+              <button type="submit" class="btn-save">保存</button>
+              <button type="button" class="button-secondary" id="cancelModal">取消</button>
+            </div>
+          </form>
+        </div>
+      </div>`;
+
     const reload = () => loadGroups(ctx);
+    document.getElementById('addPositiveGroup').addEventListener('click', () => openModal('positive'));
+    document.getElementById('addNegativeGroup').addEventListener('click', () => openModal('negative'));
+    document.getElementById('closeModal').addEventListener('click', closeModal);
+    document.getElementById('cancelModal').addEventListener('click', closeModal);
+    document.getElementById('promptModal').querySelector('.prompt-modal-backdrop').addEventListener('click', closeModal);
     document.getElementById('groupForm').addEventListener('submit', async (event) => {
       event.preventDefault();
-      const form = groupFormElements();
+      const form = formElements();
       await api('/admin/api/prompt-groups', { method: 'POST', body: JSON.stringify({
-        id: form.id.value, name: form.name.value, type: form.type.value, remark: form.remark.value, content: form.content.value
+        id: form.id.value, name: form.name.value, type: form.type.value,
+        remark: form.remark.value, content: form.content.value
       }) });
-      clearForm();
+      closeModal();
       ctx.toast('提示词组已保存', 'success');
       await reload();
     });
-    document.getElementById('resetGroup').addEventListener('click', clearForm);
-    document.getElementById('reloadGroups').addEventListener('click', reload);
     await reload();
   }
 };
 
 async function loadGroups(ctx) {
   const list = asList(await api('/admin/api/prompt-groups'));
-  const container = document.getElementById('groupsTable');
-  if (!list.length) {
-    container.innerHTML = '<div class="empty">暂无提示词组</div>';
-    return;
-  }
-  container.innerHTML = `<div class="table-wrap"><table><thead><tr><th>名称</th><th>类型</th><th>内容</th><th>操作</th></tr></thead><tbody>${list.map((g) => `
-    <tr><td>${escapeHTML(g.name)}</td><td><span class="badge">${g.type === 'positive' ? '正面' : '负面'}</span></td><td>${escapeHTML(g.content)}</td><td><button class="button-secondary" data-edit="${escapeHTML(g.id)}">编辑</button> <button class="button-danger" data-delete="${escapeHTML(g.id)}">删除</button></td></tr>`).join('')}</tbody></table></div>`;
-  container.querySelectorAll('[data-edit]').forEach((btn) => btn.addEventListener('click', () => {
-    const group = list.find((item) => item.id === btn.dataset.edit);
-    const form = groupFormElements();
-    form.id.value = group.id; form.name.value = group.name; form.type.value = group.type; form.remark.value = group.remark || ''; form.content.value = group.content;
-  }));
-  container.querySelectorAll('[data-delete]').forEach((btn) => btn.addEventListener('click', async () => {
-    if (!confirm('确认删除提示词组？')) return;
-    await api(`/admin/api/prompt-groups/${encodeURIComponent(btn.dataset.delete)}`, { method: 'DELETE' });
-    ctx.toast('提示词组已删除', 'success');
-    await loadGroups(ctx);
-  }));
+  const positive = list.filter(g => g.type === 'positive');
+  const negative = list.filter(g => g.type === 'negative');
+
+  const positiveEl = document.getElementById('positiveList');
+  const negativeEl = document.getElementById('negativeList');
+
+  positiveEl.innerHTML = positive.length > 0
+    ? positive.map(g => groupCard(g)).join('')
+    : '<div class="empty-inline">暂无正面提示词组</div>';
+
+  negativeEl.innerHTML = negative.length > 0
+    ? negative.map(g => groupCard(g)).join('')
+    : '<div class="empty-inline">暂无负面提示词组</div>';
+
+  // Bind events
+  document.querySelectorAll('[data-edit-group]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const group = list.find(item => item.id === btn.dataset.editGroup);
+      if (group) editGroup(group);
+    });
+  });
+
+  document.querySelectorAll('[data-delete-group]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('确认删除提示词组？')) return;
+      await api(`/admin/api/prompt-groups/${encodeURIComponent(btn.dataset.deleteGroup)}`, { method: 'DELETE' });
+      ctx.toast('提示词组已删除', 'success');
+      await loadGroups(ctx);
+    });
+  });
+
+  document.querySelectorAll('[data-copy-content]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const group = list.find(item => item.id === btn.dataset.copyContent);
+      if (group) {
+        navigator.clipboard.writeText(group.content).then(() => ctx.toast('已复制到剪贴板', 'success')).catch(() => {});
+      }
+    });
+  });
 }
 
-function clearForm() {
-  const form = groupFormElements();
-  form.id.value = ''; form.name.value = ''; form.type.value = 'positive'; form.remark.value = ''; form.content.value = '';
+function groupCard(group) {
+  const contentPreview = (group.content || '').length > 200
+    ? group.content.slice(0, 200) + '...'
+    : group.content || '';
+  const typeBadge = group.type === 'positive'
+    ? '<span class="badge-success">正面</span>'
+    : '<span class="badge-danger">负面</span>';
+
+  return `
+    <div class="prompt-card">
+      <div class="prompt-card-header">
+        <div class="prompt-card-title">
+          <strong>${escapeHTML(group.name)}</strong>
+          ${typeBadge}
+        </div>
+        <div class="prompt-card-actions">
+          <button class="button-secondary prompt-card-btn" data-edit-group="${escapeHTML(group.id)}">编辑</button>
+          <button class="button-secondary prompt-card-btn" data-copy-content="${escapeHTML(group.id)}">复制</button>
+          <button class="button-secondary prompt-card-btn btn-danger-text" data-delete-group="${escapeHTML(group.id)}">删除</button>
+        </div>
+      </div>
+      ${group.remark ? `<div class="prompt-card-remark">${escapeHTML(group.remark)}</div>` : ''}
+      <pre class="prompt-card-content">${escapeHTML(contentPreview)}</pre>
+    </div>`;
 }
 
-function groupFormElements() {
+function openModal(type = 'positive') {
+  const modal = document.getElementById('promptModal');
+  const form = formElements();
+  form.id.value = '';
+  form.name.value = '';
+  form.type.value = type;
+  form.remark.value = '';
+  form.content.value = '';
+  document.getElementById('modalTitle').textContent = '新增提示词组';
+  modal.classList.remove('hidden');
+}
+
+function editGroup(group) {
+  const modal = document.getElementById('promptModal');
+  const form = formElements();
+  form.id.value = group.id;
+  form.name.value = group.name;
+  form.type.value = group.type;
+  form.remark.value = group.remark || '';
+  form.content.value = group.content;
+  document.getElementById('modalTitle').textContent = '编辑提示词组';
+  modal.classList.remove('hidden');
+}
+
+function closeModal() {
+  document.getElementById('promptModal').classList.add('hidden');
+}
+
+function formElements() {
   return {
     id: document.getElementById('group_id'),
     name: document.getElementById('group_name'),
