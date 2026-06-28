@@ -123,6 +123,18 @@ func TestChatCompletionReturnsUpstreamImageURLAndLogsMetadata(t *testing.T) {
 			if r.Header.Get("Authorization") != "Bearer test-key" {
 				t.Fatalf("authorization not forwarded: %q", r.Header.Get("Authorization"))
 			}
+			var payload map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatalf("decode upstream request: %v", err)
+			}
+			if payload["model_index"].(float64) == float64(model.ZImageModelIndex) {
+				if payload["steps"].(float64) != 8 {
+					t.Fatalf("Z-Image must force 8 steps, got %#v", payload["steps"])
+				}
+				if strings.Contains(payload["prompt"].(string), "masterpiece") {
+					t.Fatalf("Z-Image prompt should not append selected quality prompt: %q", payload["prompt"])
+				}
+			}
 			writeJSON(w, http.StatusOK, map[string]any{
 				"success": true,
 				"message": "图像生成成功",
@@ -176,6 +188,11 @@ func TestChatCompletionReturnsUpstreamImageURLAndLogsMetadata(t *testing.T) {
 	if log.ImageRecordID == "" || log.ImageReturnMode != "upstream_url" || !strings.Contains(log.UpstreamResponseBody, "图像生成成功") {
 		t.Fatalf("missing log detail fields: %#v", log)
 	}
+
+	requestJSON(t, handler, http.MethodPost, "/v1/chat/completions", map[string]any{
+		"model":    "sd-generate",
+		"messages": []map[string]any{{"role": "user", "content": "sd15 landscape --steps 30"}},
+	}, http.StatusOK, &response, nil, map[string]string{"Authorization": "Bearer test-key"})
 }
 
 func requestJSON(t *testing.T, handler http.Handler, method, path string, body any, want int, out any, cookies []*http.Cookie, extraHeaders ...map[string]string) []*http.Cookie {

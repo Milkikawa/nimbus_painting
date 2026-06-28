@@ -76,10 +76,24 @@ func (a *App) health(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) models(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": []map[string]any{
+	data := []map[string]any{
 		{"id": "sd-generate", "object": "model", "created": 0, "owned_by": "image-proxy"},
 		{"id": "sd-edit", "object": "model", "created": 0, "owned_by": "image-proxy"},
-	}})
+	}
+	for _, item := range model.UpstreamModels {
+		data = append(data, map[string]any{
+			"id":          item.ID,
+			"object":      "model",
+			"created":     0,
+			"owned_by":    "upstream",
+			"index":       item.Index,
+			"name":        item.Name,
+			"type":        item.Type,
+			"available":   item.Available,
+			"image_model": item.Available && item.Type == model.UpstreamModelTypeImage,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": data})
 }
 
 type chatRequest struct {
@@ -128,21 +142,28 @@ func (a *App) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	parsed := parser.Parse(content, settings)
-	if parsed.ModelIndex == 14 {
-		openAIError(w, http.StatusBadRequest, "sd14 is edit-only and cannot be used by sd-generate", "invalid_request_error", "unsupported_model_index")
+	upstreamModel, ok := model.UpstreamModelByIndex(parsed.ModelIndex)
+	if !ok {
+		openAIError(w, http.StatusBadRequest, "unsupported model index", "invalid_request_error", "unsupported_model_index")
 		return
 	}
-	if parsed.ModelIndex < 0 || parsed.ModelIndex > 13 {
-		openAIError(w, http.StatusBadRequest, "unsupported model index", "invalid_request_error", "unsupported_model_index")
+	if !upstreamModel.Available || upstreamModel.Type != model.UpstreamModelTypeImage {
+		openAIError(w, http.StatusBadRequest, "model index is not available for image generation", "invalid_request_error", "unsupported_model_index")
 		return
 	}
 	if parsed.Prompt == "" {
 		openAIError(w, http.StatusBadRequest, "missing prompt", "invalid_request_error", "missing_prompt")
 		return
 	}
+	if parsed.ModelIndex == model.ZImageModelIndex {
+		parsed.Steps = 8
+	}
 
 	positive, negative := a.selectedPrompts(r.Context(), settings)
 	finalPrompt := parser.AppendPositive(parsed.Prompt, positive)
+	if parsed.ModelIndex == model.ZImageModelIndex {
+		finalPrompt = parser.AppendPositive(parsed.Prompt, "")
+	}
 	reqLog := model.RequestLog{ID: store.NewID("req"), CreatedAt: time.Now(), Model: req.Model, ModelIndex: parsed.ModelIndex, RawPrompt: content, FinalPrompt: finalPrompt, NegativePrompt: negative, Width: parsed.Width, Height: parsed.Height, Steps: parsed.Steps, CFG: parsed.CFG, Seed: parsed.Seed, UpstreamEndpoint: settings.UpstreamEndpoint, ImageReturnMode: "upstream_url"}
 	a.activeRequests.Add(1)
 	defer a.activeRequests.Add(-1)
@@ -226,7 +247,11 @@ func (a *App) loadSettings(ctx context.Context) (model.Settings, error) {
 	if err != nil {
 		return model.Settings{}, err
 	}
-	settings := model.Settings{UpstreamEndpoint: items["upstream_endpoint"], DefaultModel: atoi(items["default_model_index"], 4), DefaultWidth: atoi(items["default_width"], 832), DefaultHeight: atoi(items["default_height"], 1216), DefaultSteps: atoi(items["default_steps"], 20), DefaultCFG: atof(items["default_cfg"], 7), MinDimension: atoi(items["min_dimension"], 64), MaxDimension: atoi(items["max_dimension"], 2048), RequestTimeout: atoi(items["request_timeout_seconds"], 120), PositiveGroupID: items["selected_positive_group_id"], NegativeGroupID: items["selected_negative_group_id"], ImageSaveDir: items["image_save_dir"]}
+	defaultModel := atoi(items["default_model_index"], model.DefaultUpstreamModelIndex)
+	if !model.IsImageGenerationModel(defaultModel) {
+		defaultModel = model.DefaultUpstreamModelIndex
+	}
+	settings := model.Settings{UpstreamEndpoint: items["upstream_endpoint"], DefaultModel: defaultModel, DefaultWidth: atoi(items["default_width"], 832), DefaultHeight: atoi(items["default_height"], 1216), DefaultSteps: atoi(items["default_steps"], 20), DefaultCFG: atof(items["default_cfg"], 7), MinDimension: atoi(items["min_dimension"], 64), MaxDimension: atoi(items["max_dimension"], 2048), RequestTimeout: atoi(items["request_timeout_seconds"], 120), PositiveGroupID: items["selected_positive_group_id"], NegativeGroupID: items["selected_negative_group_id"], ImageSaveDir: items["image_save_dir"]}
 	if settings.RequestTimeout < 1 {
 		settings.RequestTimeout = 120
 	}
@@ -480,13 +505,13 @@ func (a *App) validateSettingsUpdate(ctx context.Context, items map[string]strin
 	maxDimension := atoi(merged["max_dimension"], 2048)
 	defaultWidth := atoi(merged["default_width"], 832)
 	defaultHeight := atoi(merged["default_height"], 1216)
-	defaultModel := atoi(merged["default_model_index"], 4)
+	defaultModel := atoi(merged["default_model_index"], model.DefaultUpstreamModelIndex)
 	defaultSteps := atoi(merged["default_steps"], 20)
 	defaultCFG := atof(merged["default_cfg"], 7)
 	requestTimeout := atoi(merged["request_timeout_seconds"], 120)
 
-	if defaultModel < 0 || defaultModel > 13 {
-		return fmt.Errorf("default_model_index must be between 0 and 13")
+	if !model.IsImageGenerationModel(defaultModel) {
+		return fmt.Errorf("default_model_index must be an available image model index between 0 and %d", model.MaxUpstreamModelIndex())
 	}
 	if minDimension < 1 || maxDimension < 1 || minDimension > maxDimension {
 		return fmt.Errorf("min_dimension and max_dimension must be positive and min_dimension must not exceed max_dimension")
