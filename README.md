@@ -1,8 +1,10 @@
-# Nimbus Painting Proxy
+# Nimbus Painting
 
-一个面向特定绘图站点的 OpenAI 兼容转发层。
+面向特定上游绘图服务的 OpenAI 兼容转发层。
 
-它的作用很简单：让 NewAPI、Koishi、NapCat、Telegram Bot、Discord Bot 等下游工具，可以像调用 OpenAI Chat Completions 一样调用原站的绘图接口。
+项目将上游绘图接口封装为标准 OpenAI Chat Completions 格式，使 NewAPI、Koishi、NapCat 及各类即时通讯 Bot 等下游工具能够以调用 OpenAI 的方式接入上游绘图能力，无需针对上游非标准 API 单独适配。
+
+## 转发链路
 
 ```text
 QQ / Telegram / Discord
@@ -11,48 +13,61 @@ Bot / 插件
         ↓
 NewAPI
         ↓
-Nimbus Painting Proxy
+Nimbus Painting
         ↓
-上游绘图 API
+上游绘图服务
 ```
-
-本项目不是通用绘图平台，也不是前端绘图站。它主要解决“原站 API 端点不规则、不兼容 OpenAI 格式、不方便直接接入 NewAPI”的问题。
 
 ---
 
-## 主要功能
+## 工作原理
 
-- 对 NewAPI 暴露 OpenAI 兼容接口：`/v1/models`、`/v1/chat/completions`
-- 对外只暴露两个模型：`sd-generate` 和 `sd-edit`
-- 用户在聊天里输入 `sd4, 1girl, cat ears` 即可选择内部模型编号
-- 自动解析尺寸、seed、steps、cfg 等参数
-- 自动把控制参数从最终 prompt 里清理掉
-- API Key 只从请求头透传给上游，不保存、不展示、不写日志
-- 支持 WebUI 配置上游 endpoint、默认参数、提示词组
-- 支持默认正面提示词组后插
-- 支持默认负面提示词组单独传给上游 `negative_prompt`
-- 自动下载上游返回的图片并保存到本地
-- 支持 SQLite 和 MariaDB
+一次完整的生图请求经历以下阶段：
+
+1. **接收请求** — 下游工具按 OpenAI Chat Completions 格式发送请求，消息内容即用户提示词。
+2. **解析参数** — 从提示词中识别模型编号、尺寸、seed、steps、cfg 等控制参数，识别完成后将其从提示词中移除，避免控制参数污染最终发送给上游的 prompt。
+3. **拼接提示词** — 若管理后台配置了默认正面 / 负面提示词组，正面词追加至用户提示词末尾，负面词作为独立的 `negative_prompt` 传递给上游。
+4. **调用上游** — 整理后的参数发送至上游绘图接口，请求头中的 `Authorization` 字段原样透传。项目不保存、不展示、不记录 API Key。
+5. **返回结果** — 上游返回图片地址后，包装为 OpenAI 风格回复返回给下游。
+6. **本地归档** — 生成成功后，项目将图片下载至本地归档，供管理后台图片管理页面查看。
+7. **记录日志** — 请求的关键信息写入数据库，包括原始输入、最终 prompt、发送给上游的完整参数、上游响应状态、图片地址、点数消耗等。
+
+对外暴露两个抽象模型：一个用于文生图，一个预留给图片编辑。用户在提示词中通过 `sd` 加数字选择上游内部模型编号，省略时使用默认编号。可选范围与默认值可在管理后台「基础设置」中查看。
+
+---
+
+## 核心特性
+
+- 向下游暴露 OpenAI 兼容接口：`/v1/models`、`/v1/chat/completions`
+- 自动解析尺寸、seed、steps、cfg 等参数，并从最终 prompt 中移除控制参数
+- 支持在管理后台配置默认正面 / 负面提示词组，正面词后插、负面词单独传递
+- API Key 仅从请求头透传至上游，不保存、不展示、不写入日志
+- 生成成功后自动下载图片至本地归档
+- 提供管理后台，支持配置上游、默认参数、提示词组，查看请求日志与图片
+- 管理后台包含概览、项目监测、基础设置、提示词组、图片管理、请求日志等多个视图
+- 支持 SQLite 与 MariaDB
 - 支持 Docker 部署
 
 ---
 
-## 当前模型规则
+## 部署
 
-| 用户输入 | 含义 | 当前状态 |
-|---|---|---|
-| `sd0` - `sd13` | 普通文生图模型 | 可用 |
-| `sd14` | 图片编辑模型 | 保留，暂不实现 |
-| `sd15+` | 视频或其他不支持模型 | 禁止 |
-| 不写 `sdX` | 使用默认模型 | 默认回退 `sd4` |
+### Docker 部署
 
-`sd-edit` 这个抽象模型会保留，但当前不会真正改图。原因是不同聊天平台和插件传入图片的方式还没有统一确认。
+项目提供两套 Docker 部署方案，分别对应不同的网络环境：
 
----
+| 方案 | 适用环境 | Dockerfile | Compose 文件 | 镜像源 |
+|---|---|---|---|---|
+| **默认方案** | 常规网络环境 | `Dockerfile` | `docker-compose.yml` | 官方源 |
+| **国内加速方案** | 国内网络环境 | `Dockerfile.cn` | `docker-compose.cn.yml` | 腾讯云镜像源 |
 
-## 快速开始：Docker
+两套配置均会自动加入已有的外部网络 `1panel-network`，便于在 1Panel 环境下与其他容器互通。若服务器尚未创建该网络，需先手动创建：
 
-### 1. 准备环境文件
+```bash
+docker network create 1panel-network
+```
+
+#### 1. 准备环境文件
 
 复制示例环境文件：
 
@@ -60,21 +75,23 @@ Nimbus Painting Proxy
 cp .env.example .env
 ```
 
-Windows PowerShell：
+默认端口为 `4030`，通常无需修改 `.env`。
 
-```powershell
-Copy-Item .env.example .env
-```
+#### 2. 启动服务
 
-默认端口是 `4030`。一般情况下，先不用改 `.env`。
-
-### 2. 启动服务
+**默认方案**（常规网络环境）：
 
 ```bash
 docker compose up -d --build
 ```
 
-### 3. 打开 WebUI
+**国内加速方案**（国内网络环境）：
+
+```bash
+docker compose -f docker-compose.cn.yml up -d --build
+```
+
+#### 3. 打开管理后台
 
 浏览器访问：
 
@@ -82,52 +99,54 @@ docker compose up -d --build
 http://localhost:4030/dashboard
 ```
 
-首次进入时，设置管理员密码。
+首次进入时设置管理员密码。
 
-### 4. 配置上游 endpoint
+#### 4. 配置上游接口
 
-登录 WebUI 后，在“基础设置”里填写上游完整 endpoint。
+登录后台后，在「基础设置」中填写上游的完整生图 endpoint。
 
-注意：这里必须填写完整生成接口地址。本项目不会在源码里写死真实站点，也不会帮你拼接 path。
+需填写完整的生成接口地址，例如 `https://[上游域名]/完整/生成接口/path`。项目不会在源码中写死真实站点，也不会自动拼接 path，地址完全由使用者填写。
 
-也可以在 `.env` 里提前填写：
+也可在 `.env` 中提前配置：
 
 ```env
-UPSTREAM_ENDPOINT=https://你的上游域名/完整/生成接口/path
+UPSTREAM_ENDPOINT=https://[上游域名]/完整/生成接口/path
 ```
 
-这只是首次初始化数据库时的便捷入口。之后你仍然可以在 WebUI 的“基础设置”里修改它。
+该配置项仅用于首次初始化数据库时的便捷写入，之后仍可在后台「基础设置」中修改。
 
-### 5. 配置 NewAPI
+#### 5. 配置 NewAPI
 
 在 NewAPI 中添加一个 OpenAI 兼容渠道：
 
 ```text
-Base URL: http://你的机器IP:4030
+Base URL: http://<服务器IP>:4030
 模型: sd-generate
 ```
 
-API Key 仍然填写原站 API Key。NewAPI 请求本项目时会带上 `Authorization: Bearer ...`，本项目只负责原样透传给上游。
+API Key 照常填写原站 API Key。NewAPI 请求项目时会携带 `Authorization: Bearer ...`，项目负责原样透传至上游。
 
----
+### 源码运行
 
-## 没有 Docker 怎么办
+不使用 Docker 时，可直接使用 Go 运行。
 
-Windows 没有 Docker 时，可以直接运行 Go 版本。
+#### 1. 安装 Go
 
-### 1. 安装 Go
+安装 Go 1.22 或更高版本。国内环境建议配置 Go 模块代理：
 
-安装 Go 1.22 或更高版本。
+```bash
+go env -w GOPROXY=https://goproxy.cn,direct
+```
 
-### 2. 下载依赖
+#### 2. 下载依赖
 
-```powershell
+```bash
 go mod tidy
 ```
 
-### 3. 启动服务
+#### 3. 启动服务
 
-```powershell
+```bash
 go run ./cmd/server
 ```
 
@@ -137,18 +156,11 @@ go run ./cmd/server
 http://localhost:4030/dashboard
 ```
 
-本地直跑时，默认会使用：
-
-```text
-config/app.db
-images/
-```
-
-这两个目录已经被 `.gitignore` 忽略，不会误提交。
+源码运行时默认使用 `config/app.db` 与 `images/` 两个路径，二者已被 `.gitignore` 忽略，不会误提交至版本库。
 
 ---
 
-## 环境变量说明
+## 环境变量
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
@@ -156,10 +168,10 @@ images/
 | `DB_DRIVER` | `sqlite` | 数据库类型：`sqlite` 或 `mariadb` |
 | `SQLITE_PATH` | `/app/config/app.db` | Docker 中 SQLite 数据库路径 |
 | `MARIADB_DSN` | 空 | MariaDB 连接字符串 |
-| `UPSTREAM_ENDPOINT` | 空 | 上游完整生图 endpoint，可留空后在 WebUI 配置 |
+| `UPSTREAM_ENDPOINT` | 空 | 上游完整生图 endpoint，可留空后于后台配置 |
 | `IMAGE_DIR` | `/app/images` | Docker 中图片保存目录 |
-| `PUBLIC_BASE_URL` | 空 | 本地归档图片 URL 的外部访问前缀；不影响默认下游返回的上游原图链接 |
-| `SESSION_TTL_HOURS` | `24` | WebUI 登录有效期 |
+| `PUBLIC_BASE_URL` | 空 | 本地归档图片 URL 的外部访问前缀；不影响返回给下游的上游原图链接 |
+| `SESSION_TTL_HOURS` | `24` | 后台登录有效期 |
 | `DEFAULT_TIMEOUT_SECONDS` | `120` | 默认上游请求超时 |
 
 MariaDB DSN 示例：
@@ -168,43 +180,51 @@ MariaDB DSN 示例：
 user:password@tcp(127.0.0.1:3306)/database?parseTime=true&charset=utf8mb4
 ```
 
-如果你使用 Docker 部署，并且 MariaDB 也在 Docker 网络里，host 通常要写 MariaDB 服务名，而不是 `127.0.0.1`。
+> 若使用 Docker 部署且 MariaDB 同位于 Docker 网络中，host 需填写 MariaDB 的服务名，而非 `127.0.0.1`。
 
 ---
 
-## 用户怎么发图
+## 提示词语法
 
-最简单的输入：
+用户在聊天中直接输入提示词即可，可在开头使用 `sd` 加数字选择内部模型编号，省略时使用默认编号。
+
+基本输入：
+
+```text
+1girl, cat ears
+```
+
+指定模型编号：
 
 ```text
 sd4, 1girl, cat ears
 ```
 
-带尺寸：
+指定尺寸（`*` 或 `x` 均可）：
 
 ```text
 sd4, 1girl, cat ears, 832*1216
 ```
 
-带 seed：
+指定 seed：
 
 ```text
 sd4, 1girl, cat ears, --seed 8848
 ```
 
-带 steps 和 cfg：
+指定 steps 与 cfg：
 
 ```text
 sd4, 1girl, cat ears, --steps 28, --cfg 7.5
 ```
 
-这些控制参数会被自动删除，不会污染最终传给上游的 prompt。
+上述控制参数会被自动识别并从提示词中移除，不会出现在最终传递给上游的 prompt 中。可选编号范围、默认值及参数边界均可在后台「基础设置」中查看。
 
 ---
 
-## 返回图片
+## 返回格式
 
-当前返回给下游的是 Markdown 图片格式，图片地址默认使用上游原始 `image_url`：
+当前返回给下游的为 Markdown 图片格式，图片地址默认使用上游返回的原始链接：
 
 ```text
 ![generated image](上游图片URL)
@@ -214,15 +234,13 @@ Seed: 8848
 Model: sd4
 ```
 
-生成成功后，本项目仍会尝试把图片下载到本地归档，供 WebUI 图片管理页面查看。但本地归档地址不会再覆盖下游返回地址，避免 NewAPI、Koishi、NapCat、QQ 客户端等外部用户收到 `/images/...` 这种只能在本服务内访问的相对路径。
-
-如果后续发现某些插件不解析 Markdown，可以再调整成纯文本或其他格式。
+生成成功后，项目仍会将图片下载至本地归档，供后台图片管理页面查看。本地归档地址不会覆盖返回给下游的图片地址，以避免 NewAPI、Koishi、NapCat、QQ 客户端等外部用户收到 `/images/...` 这类仅能在本项目内部访问的相对路径。
 
 ---
 
-## 图片保存
+## 图片归档
 
-生成成功后，服务会下载上游图片并保存到本地。
+生成成功后，项目会下载上游图片并保存至本地。
 
 Docker 默认挂载：
 
@@ -236,61 +254,52 @@ Docker 默认挂载：
 images/YYYY-MM-DD/YYYY-MM-DD_HH-mm_sd4_seed8848_ab12cd.jpg
 ```
 
-文件名包含：
+文件名包含：生成日期、生成时间（精确到分钟）、模型编号、seed、随机字符（规避并发冲突）。
 
-- 生成日期
-- 生成时间，精确到分钟
-- 模型编号
-- seed
-- 随机字符，避免并发冲突
-
-WebUI 会同时记录上游原图链接、本地归档链接、上游图片 ID、上游模型名称和实际返回给下游的图片链接。`PUBLIC_BASE_URL` 只用于把本地归档链接从 `/images/...` 拼成外部绝对地址；如果没有可公开访问的本项目地址，可以保持为空。
+后台会同时记录上游原图链接、本地归档链接、上游图片 ID、上游模型名称及实际返回给下游的图片链接。`PUBLIC_BASE_URL` 仅用于将本地归档链接从 `/images/...` 拼接为外部绝对地址；若无可公开访问的项目地址，保持为空即可。
 
 ---
 
 ## 请求日志
 
-管理后台的“请求日志”会记录每次生图的关键上下文：
+后台「请求日志」记录每次生图的关键上下文：
 
-- 用户原始输入、最终正面提示词和负面提示词
-- 实际发送给上游的完整参数，包括缺省后的尺寸、steps、cfg、seed 和模型编号
+- 用户原始输入、最终正面提示词与负面提示词
+- 实际发送给上游的完整参数，包括缺省后的尺寸、steps、cfg、seed 与模型编号
 - 上游 HTTP 状态码、原始响应体、`image_url`、`image_id`、`model_name`
-- 上游返回的 `points_used` 和 `remaining_points`
+- 上游返回的 `points_used` 与 `remaining_points`
 - 实际返回给下游的图片 URL、图片返回模式、本地保存错误
 
-点数信息只在单条日志中展示，不纳入全局统计。因为不同上游地址和不同 API Key 的余额口径可能不同，混入总览会产生误导。
+点数信息仅在单条日志中展示，不纳入全局统计。不同上游地址与不同 API Key 的余额口径可能不同，混入总览会产生误导。点击单条日志可展开查看完整请求 / 响应 JSON。
 
 ---
 
-## WebUI 能做什么
+## 管理后台
 
-访问：
+访问地址：
 
 ```text
 http://localhost:4030/dashboard
 ```
 
-当前支持：
+包含以下视图：
 
-- 首次初始化管理员密码
-- 登录和退出
-- 配置上游 endpoint
-- 配置默认模型、默认宽高、steps、cfg
-- 配置尺寸边界和请求超时
-- 配置图片保存目录
-- 管理正面提示词组
-- 管理负面提示词组
-- 全局单选当前使用的正面组和负面组
-- 查看请求日志
-- 查看和删除已保存图片
+- **概览** — 核心指标卡片、运行状态摘要、模型使用统计、最近活动
+- **项目监测** — 进程资源占用（内存、协程、GC）、图片统计、任务统计与成功率
+- **基础设置** — 上游接口、默认模型、默认尺寸、steps、cfg、尺寸边界、请求超时、图片保存目录、默认提示词组选择
+- **提示词组** — 新增 / 编辑 / 删除正面与负面提示词组
+- **图片管理** — 查看与删除已保存的生成图片
+- **请求日志** — 按成功 / 失败筛选，查看每条请求的完整详情
+
+支持浅色 / 深色主题切换。
 
 ---
 
-## 数据库选择
+## 数据库
 
 ### SQLite
 
-默认就是 SQLite，适合个人部署。
+默认使用 SQLite，适合个人部署，开箱即用。
 
 ```env
 DB_DRIVER=sqlite
@@ -299,38 +308,34 @@ SQLITE_PATH=/app/config/app.db
 
 ### MariaDB
 
-如果你已经有 MariaDB，可以改成：
-
 ```env
 DB_DRIVER=mariadb
 MARIADB_DSN=user:password@tcp(host:3306)/database?parseTime=true&charset=utf8mb4
 ```
 
-数据库只在服务启动时读取。WebUI 不支持修改底层数据库，也不做在线热切换。
-
-SQLite 和 MariaDB 的数据不会自动互通。如果中途切换数据库，需要自己处理数据迁移，或者接受新数据库从空数据开始。
+数据库仅在服务启动时读取。后台不支持修改底层数据库，也不做在线热切换。SQLite 与 MariaDB 的数据不会自动互通，中途切换数据库需自行处理数据迁移，或接受新数据库从空数据开始。
 
 ---
 
 ## 安全说明
 
-- 上游 API Key 不会保存在本项目里。
-- 上游 API Key 不会显示在 WebUI。
-- 日志不会记录完整 `Authorization`。
-- WebUI 有登录密码和 session cookie。
-- 本项目默认不启用 HTTPS，适合内网或反向代理后使用。
+- 上游 API Key 不保存在项目中。
+- 上游 API Key 不在后台展示。
+- 日志不记录完整 `Authorization`。
+- 后台具备登录密码与 session cookie 机制。
+- 项目默认不启用 HTTPS，适合内网或反向代理后使用。
 
-如果你要暴露到公网，请务必放在反向代理后，并启用 HTTPS 和访问控制。
+若需暴露至公网，务必置于反向代理之后，并启用 HTTPS 与访问控制。
 
 ---
 
 ## 当前限制
 
-- `sd-edit` 只是保留接口，暂不支持真实图片编辑。
-- `stream: true` 是伪流式：等待上游完成后一次性返回结果。
+- 图片编辑模型仅保留接口，暂不支持真实图片编辑（不同聊天平台与插件的传图方式尚未统一确认）。
+- `stream: true` 为伪流式：等待上游完成后一次性返回结果。
 - 暂不支持图片批量 zip 下载。
-- 暂不支持数据库互迁。
+- 暂不支持 SQLite / MariaDB 之间的数据互迁。
 - 暂不支持 PostgreSQL。
 - 暂不做多用户系统。
 
-更详细的实现状态会随着后续版本整理到公开文档中；当前版本以本 README 和更新记录为准。
+更详细的实现状态会随版本整理至 `docs/changelog/`，当前版本以本 README 与更新记录为准。

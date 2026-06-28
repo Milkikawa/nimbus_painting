@@ -1,3 +1,5 @@
+# 默认 Dockerfile —— 适用于海外网络环境，使用官方源。
+# 国内网络环境请使用 Dockerfile.cn。
 FROM golang:1.22-alpine AS build
 RUN apk add --no-cache gcc musl-dev
 WORKDIR /src

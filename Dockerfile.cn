@@ -1,0 +1,32 @@
+# Dockerfile.cn —— 适用于国内网络环境，使用腾讯云镜像源加速构建。
+# 海外网络环境请使用默认 Dockerfile。
+FROM golang:1.22-alpine AS build
+
+# 替换 Alpine apk 源为腾讯云镜像
+RUN sed -i 's#dl-cdn.alpinelinux.org#mirrors.tencent.com#g' /etc/apk/repositories && \
+    apk add --no-cache gcc musl-dev git ca-certificates
+
+WORKDIR /src
+COPY go.mod go.sum* ./
+
+# 使用腾讯云 Go 模块代理加速依赖下载
+ENV GOPROXY=https://goproxy.cn,direct
+RUN go mod download
+
+COPY . .
+RUN CGO_ENABLED=1 go build -o /out/nimbus-painting ./cmd/server
+
+FROM alpine:3.20
+
+# 运行阶段同样使用腾讯云 apk 源
+RUN sed -i 's#dl-cdn.alpinelinux.org#mirrors.tencent.com#g' /etc/apk/repositories && \
+    apk add --no-cache ca-certificates tzdata && \
+    sed -i 's#mirrors.tencent.com#dl-cdn.alpinelinux.org#g' /etc/apk/repositories
+
+WORKDIR /app
+COPY --from=build /out/nimbus-painting /app/nimbus-painting
+COPY web /app/web
+ENV LISTEN_ADDR=:4030 DB_DRIVER=sqlite SQLITE_PATH=/app/config/app.db IMAGE_DIR=/app/images
+VOLUME ["/app/config", "/app/images"]
+EXPOSE 4030
+CMD ["/app/nimbus-painting"]

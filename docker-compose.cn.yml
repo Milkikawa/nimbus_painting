@@ -1,8 +1,13 @@
-# 默认 docker-compose.yml —— 适用于海外网络环境。
-# 国内网络环境请使用 docker-compose.cn.yml。
+# docker-compose.cn.yml —— 适用于国内网络环境，使用 Dockerfile.cn 构建。
+# 海外网络环境请使用默认 docker-compose.yml。
+#
+# 启动命令（国内）：
+#   docker compose -f docker-compose.cn.yml up -d --build
 services:
   nimbus-painting:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.cn
     ports:
       - "4030:4030"
     environment:
