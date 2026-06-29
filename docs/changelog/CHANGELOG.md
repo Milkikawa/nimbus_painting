@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.5.1 - 模型目录配置修复
+
+### 修复
+
+- 修复 `/admin/api/models` 可保存空模型目录或无可用图片模型目录的问题，避免默认生图链路在配置保存后失效。
+- 修复默认模型被删除或禁用后 fallback 可能仍指向无效模型的问题；保存目录前会先计算并修复 `default_model_index`。
+- 模型目录保存时会规范化 `id`、`name`、`type` 的首尾空白。
+
+### 改进
+
+- 新增 `config/upstream_models.example.json`，让内置模型目录 schema 和默认内容在仓库中可见。
+- README 补充模型目录运行文件、示例文件、Docker/source 默认路径和 WebUI 保存逻辑说明。
+- 模型目录无变化保存时跳过落盘，减少机械硬盘 HDD 上不必要的临时文件写入、fsync 和 rename；有变化时仍保留原子写入策略。
+
+### 注意事项
+
+- Docker 部署的真实运行文件仍是宿主机 `./config/upstream_models.json` 对应容器内 `/app/config/upstream_models.json`。
+- `config/upstream_models.example.json` 仅作示例，不会被服务自动读取或覆盖。
+- 已通过 `go test ./...`、`node --check`、`go build ./cmd/server` 和 race test 验证。
+
 ## 0.5.0 - 可配置上游模型目录
 
 ### 已加入

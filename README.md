@@ -156,24 +156,24 @@ go run ./cmd/server
 http://localhost:4030/dashboard
 ```
 
-源码运行时默认使用 `config/app.db` 与 `images/` 两个路径，二者已被 `.gitignore` 忽略，不会误提交至版本库。
+源码运行时默认使用 `config/app.db`、`config/upstream_models.json` 与 `images/`；其中运行时生成的数据库、模型目录和图片目录均已被 `.gitignore` 忽略，不会误提交至版本库。仓库中保留了 `config/upstream_models.example.json` 作为可见示例文件。
 
 ---
 
 ## 环境变量
 
-| 变量                      | 默认值                             | 说明                                                            |
-| ------------------------- | ---------------------------------- | --------------------------------------------------------------- |
-| `LISTEN_ADDR`             | `:4030`                            | 服务监听地址                                                    |
-| `DB_DRIVER`               | `sqlite`                           | 数据库类型：`sqlite` 或 `mariadb`                               |
-| `SQLITE_PATH`             | `/app/config/app.db`               | Docker 中 SQLite 数据库路径                                     |
-| `MARIADB_DSN`             | 空                                 | MariaDB 连接字符串                                              |
-| `UPSTREAM_ENDPOINT`       | 空                                 | 上游完整生图 endpoint，可留空后于后台配置                       |
-| `IMAGE_DIR`               | `/app/images`                      | Docker 中图片保存目录                                           |
-| `MODEL_CATALOG_PATH`      | `/app/config/upstream_models.json` | 上游模型能力目录文件；Docker 中随 `/app/config` 挂载持久化      |
-| `PUBLIC_BASE_URL`         | 空                                 | 本地归档图片 URL 的外部访问前缀；不影响返回给下游的上游原图链接 |
-| `SESSION_TTL_HOURS`       | `24`                               | 后台登录有效期                                                  |
-| `DEFAULT_TIMEOUT_SECONDS` | `120`                              | 默认上游请求超时                                                |
+| 变量                      | Docker 默认值                      | 源码默认值                    | 说明                                                            |
+| ------------------------- | ---------------------------------- | ----------------------------- | --------------------------------------------------------------- |
+| `LISTEN_ADDR`             | `:4030`                            | `:4030`                       | 服务监听地址                                                    |
+| `DB_DRIVER`               | `sqlite`                           | `sqlite`                      | 数据库类型：`sqlite` 或 `mariadb`                               |
+| `SQLITE_PATH`             | `/app/config/app.db`               | `config/app.db`               | SQLite 数据库路径                                               |
+| `MARIADB_DSN`             | 空                                 | 空                            | MariaDB 连接字符串                                              |
+| `UPSTREAM_ENDPOINT`       | 空                                 | 空                            | 上游完整生图 endpoint，可留空后于后台配置                       |
+| `IMAGE_DIR`               | `/app/images`                      | `images`                      | 图片保存目录                                                    |
+| `MODEL_CATALOG_PATH`      | `/app/config/upstream_models.json` | `config/upstream_models.json` | 上游模型能力目录文件；Docker 中随 `/app/config` 挂载持久化      |
+| `PUBLIC_BASE_URL`         | 空                                 | 空                            | 本地归档图片 URL 的外部访问前缀；不影响返回给下游的上游原图链接 |
+| `SESSION_TTL_HOURS`       | `24`                               | `24`                          | 后台登录有效期                                                  |
+| `DEFAULT_TIMEOUT_SECONDS` | `120`                              | `120`                         | 默认上游请求超时                                                |
 
 MariaDB DSN 示例：
 
@@ -232,13 +232,30 @@ sd4, 1girl, cat ears, --steps 28, --cfg 7.5
 - 特殊参数规则，例如强制 steps、是否追加默认正面提示词
 - `/v1/models` 当前返回给调用方的上游模型元数据
 
-模型目录默认保存到：
+模型目录运行文件由 `MODEL_CATALOG_PATH` 指定：
 
 ```text
-/app/config/upstream_models.json
+Docker 容器内默认：/app/config/upstream_models.json
+Docker 宿主机对应：./config/upstream_models.json
+源码直接运行默认：config/upstream_models.json
 ```
 
-Docker 部署时该文件随 `./config:/app/config` 挂载持久化；首次启动若文件不存在，服务会根据内置默认模板自动生成。
+仓库同时提供一份可见示例文件：
+
+```text
+config/upstream_models.example.json
+```
+
+这份 example 只用于查看字段结构、复制初始化或对照默认内容；服务运行时不会自动读取或覆盖 example。首次启动时，如果 `MODEL_CATALOG_PATH` 指向的真实运行文件不存在，服务会根据内置默认模板自动生成运行文件。Docker 部署时该运行文件随 `./config:/app/config` 挂载持久化。
+
+WebUI「模型目录」页面的读写对象就是 `MODEL_CATALOG_PATH` 指向的真实运行文件：
+
+1. 打开页面时，后端从内存中的 catalog 返回当前模型目录。
+2. 点击保存时，WebUI 调用 `PUT /admin/api/models` 整表提交。
+3. 后端校验并规范化目录后写回同一个 JSON 文件。
+4. 保存会拒绝空目录或没有任何可用图片模型的目录，避免默认生图链路不可用。
+
+机械硬盘 HDD 部署时也可以放心使用：模型目录通常是人工低频编辑；后端会在内容没有变化时跳过落盘，不写临时文件、不执行 fsync、不 rename。有变化时仍采用“临时文件 + sync + rename”的方式保证配置文件不被半写入破坏。不建议用脚本高频循环调用模型目录保存接口。
 
 > 注意：模型目录只影响未来请求和当前 UI 展示。请求日志、图片记录和统计中的实际模型名，仍以上游响应体里的 `model_name` 为准，不会因为后来修改本地目录名称而被重写。
 
