@@ -32,7 +32,7 @@ Nimbus Painting
 6. **本地归档** — 生成成功后，项目将图片下载至本地归档，供管理后台图片管理页面查看。
 7. **记录日志** — 请求的关键信息写入数据库，包括原始输入、最终 prompt、发送给上游的完整参数、上游响应状态、图片地址、点数消耗等。
 
-对外暴露两个抽象模型：一个用于文生图，一个预留给图片编辑。用户在提示词中通过 `sd` 加数字选择上游内部模型编号，省略时使用默认编号。可选范围与默认值可在管理后台「基础设置」中查看。
+对外暴露两个抽象模型：一个用于文生图，一个预留给图片编辑。用户在提示词中通过 `sd` 加数字选择上游内部模型编号，省略时使用默认编号。可选范围、可用状态和特殊兼容规则可在管理后台「模型目录」中维护；默认编号和生成参数在「基础设置」中配置。
 
 ---
 
@@ -43,8 +43,8 @@ Nimbus Painting
 - 支持在管理后台配置默认正面 / 负面提示词组，正面词后插、负面词单独传递
 - API Key 仅从请求头透传至上游，不保存、不展示、不写入日志
 - 生成成功后自动下载图片至本地归档
-- 提供管理后台，支持配置上游、默认参数、提示词组，查看请求日志与图片
-- 管理后台包含概览、项目监测、基础设置、提示词组、图片管理、请求日志等多个视图
+- 提供管理后台，支持配置上游、默认参数、模型目录、提示词组，查看请求日志与图片
+- 管理后台包含概览、项目监测、基础设置、模型目录、提示词组、图片管理、请求日志等多个视图
 - 支持 SQLite 与 MariaDB
 - 支持 Docker 部署
 
@@ -56,9 +56,9 @@ Nimbus Painting
 
 项目提供两套 Docker 部署方案，分别对应不同的网络环境：
 
-| 方案 | 适用环境 | Dockerfile | Compose 文件 | 镜像源 |
-|---|---|---|---|---|
-| **默认方案** | 常规网络环境 | `Dockerfile` | `docker-compose.yml` | 官方源 |
+| 方案             | 适用环境     | Dockerfile      | Compose 文件            | 镜像源       |
+| ---------------- | ------------ | --------------- | ----------------------- | ------------ |
+| **默认方案**     | 常规网络环境 | `Dockerfile`    | `docker-compose.yml`    | 官方源       |
 | **国内加速方案** | 国内网络环境 | `Dockerfile.cn` | `docker-compose.cn.yml` | 腾讯云镜像源 |
 
 两套配置均会自动加入已有的外部网络 `1panel-network`，便于在 1Panel 环境下与其他容器互通。若服务器尚未创建该网络，需先手动创建：
@@ -156,23 +156,24 @@ go run ./cmd/server
 http://localhost:4030/dashboard
 ```
 
-源码运行时默认使用 `config/app.db` 与 `images/` 两个路径，二者已被 `.gitignore` 忽略，不会误提交至版本库。
+源码运行时默认使用 `config/app.db`、`config/upstream_models.json` 与 `images/`；其中运行时生成的数据库、模型目录和图片目录均已被 `.gitignore` 忽略，不会误提交至版本库。仓库中保留了 `config/upstream_models.example.json` 作为可见示例文件。
 
 ---
 
 ## 环境变量
 
-| 变量 | 默认值 | 说明 |
-|---|---|---|
-| `LISTEN_ADDR` | `:4030` | 服务监听地址 |
-| `DB_DRIVER` | `sqlite` | 数据库类型：`sqlite` 或 `mariadb` |
-| `SQLITE_PATH` | `/app/config/app.db` | Docker 中 SQLite 数据库路径 |
-| `MARIADB_DSN` | 空 | MariaDB 连接字符串 |
-| `UPSTREAM_ENDPOINT` | 空 | 上游完整生图 endpoint，可留空后于后台配置 |
-| `IMAGE_DIR` | `/app/images` | Docker 中图片保存目录 |
-| `PUBLIC_BASE_URL` | 空 | 本地归档图片 URL 的外部访问前缀；不影响返回给下游的上游原图链接 |
-| `SESSION_TTL_HOURS` | `24` | 后台登录有效期 |
-| `DEFAULT_TIMEOUT_SECONDS` | `120` | 默认上游请求超时 |
+| 变量                      | Docker 默认值                      | 源码默认值                    | 说明                                                            |
+| ------------------------- | ---------------------------------- | ----------------------------- | --------------------------------------------------------------- |
+| `LISTEN_ADDR`             | `:4030`                            | `:4030`                       | 服务监听地址                                                    |
+| `DB_DRIVER`               | `sqlite`                           | `sqlite`                      | 数据库类型：`sqlite` 或 `mariadb`                               |
+| `SQLITE_PATH`             | `/app/config/app.db`               | `config/app.db`               | SQLite 数据库路径                                               |
+| `MARIADB_DSN`             | 空                                 | 空                            | MariaDB 连接字符串                                              |
+| `UPSTREAM_ENDPOINT`       | 空                                 | 空                            | 上游完整生图 endpoint，可留空后于后台配置                       |
+| `IMAGE_DIR`               | `/app/images`                      | `images`                      | 图片保存目录                                                    |
+| `MODEL_CATALOG_PATH`      | `/app/config/upstream_models.json` | `config/upstream_models.json` | 上游模型能力目录文件；Docker 中随 `/app/config` 挂载持久化      |
+| `PUBLIC_BASE_URL`         | 空                                 | 空                            | 本地归档图片 URL 的外部访问前缀；不影响返回给下游的上游原图链接 |
+| `SESSION_TTL_HOURS`       | `24`                               | `24`                          | 后台登录有效期                                                  |
+| `DEFAULT_TIMEOUT_SECONDS` | `120`                              | `120`                         | 默认上游请求超时                                                |
 
 MariaDB DSN 示例：
 
@@ -218,7 +219,45 @@ sd4, 1girl, cat ears, --seed 8848
 sd4, 1girl, cat ears, --steps 28, --cfg 7.5
 ```
 
-上述控制参数会被自动识别并从提示词中移除，不会出现在最终传递给上游的 prompt 中。可选编号范围、默认值及参数边界均可在后台「基础设置」中查看。
+上述控制参数会被自动识别并从提示词中移除，不会出现在最终传递给上游的 prompt 中。可选编号范围、模型类型、可用状态及特殊参数规则可在后台「模型目录」中查看和维护；默认值及参数边界在「基础设置」中查看。
+
+---
+
+## 模型目录
+
+后台「模型目录」维护的是本地上游模型能力配置，用于未来请求的准入和兼容处理：
+
+- 模型索引、ID、本地显示名、类型和启用状态
+- 是否可用于图片生成链路
+- 特殊参数规则，例如强制 steps、是否追加默认正面提示词
+- `/v1/models` 当前返回给调用方的上游模型元数据
+
+模型目录运行文件由 `MODEL_CATALOG_PATH` 指定：
+
+```text
+Docker 容器内默认：/app/config/upstream_models.json
+Docker 宿主机对应：./config/upstream_models.json
+源码直接运行默认：config/upstream_models.json
+```
+
+仓库同时提供一份可见示例文件：
+
+```text
+config/upstream_models.example.json
+```
+
+这份 example 只用于查看字段结构、复制初始化或对照默认内容；服务运行时不会自动读取或覆盖 example。首次启动时，如果 `MODEL_CATALOG_PATH` 指向的真实运行文件不存在，服务会根据内置默认模板自动生成运行文件。Docker 部署时该运行文件随 `./config:/app/config` 挂载持久化。
+
+WebUI「模型目录」页面的读写对象就是 `MODEL_CATALOG_PATH` 指向的真实运行文件：
+
+1. 打开页面时，后端从内存中的 catalog 返回当前模型目录。
+2. 点击保存时，WebUI 调用 `PUT /admin/api/models` 整表提交。
+3. 后端校验并规范化目录后写回同一个 JSON 文件。
+4. 保存会拒绝空目录或没有任何可用图片模型的目录，避免默认生图链路不可用。
+
+机械硬盘 HDD 部署时也可以放心使用：模型目录通常是人工低频编辑；后端会在内容没有变化时跳过落盘，不写临时文件、不执行 fsync、不 rename。有变化时仍采用“临时文件 + sync + rename”的方式保证配置文件不被半写入破坏。不建议用脚本高频循环调用模型目录保存接口。
+
+> 注意：模型目录只影响未来请求和当前 UI 展示。请求日志、图片记录和统计中的实际模型名，仍以上游响应体里的 `model_name` 为准，不会因为后来修改本地目录名称而被重写。
 
 ---
 
@@ -245,8 +284,11 @@ Model: sd4
 Docker 默认挂载：
 
 ```text
+./config:/app/config
 ./images:/app/images
 ```
+
+其中 `./config` 保存 SQLite 数据库和模型目录 JSON，`./images` 保存本地归档图片。
 
 文件路径格式：
 
@@ -287,6 +329,7 @@ http://localhost:4030/dashboard
 - **概览** — 核心指标卡片、运行状态摘要、模型使用统计、最近活动
 - **项目监测** — 进程资源占用（内存、协程、GC）、图片统计、任务统计与成功率
 - **基础设置** — 上游接口、默认模型、默认尺寸、steps、cfg、尺寸边界、请求超时、图片保存目录、默认提示词组选择
+- **模型目录** — 新增 / 编辑 / 删除本地上游模型能力配置，维护可用状态和特殊参数规则
 - **提示词组** — 新增 / 编辑 / 删除正面与负面提示词组
 - **图片管理** — 查看与删除已保存的生成图片
 - **请求日志** — 按成功 / 失败筛选，查看每条请求的完整详情

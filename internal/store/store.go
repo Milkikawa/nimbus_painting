@@ -181,7 +181,7 @@ func (s *Store) columnExists(ctx context.Context, table, column string) (bool, e
 
 func (s *Store) seedDefaults(ctx context.Context, cfg config.Config) error {
 	defaults := map[string]string{
-		"default_model_index":     "4",
+		"default_model_index":     fmt.Sprint(model.DefaultUpstreamModelIndex),
 		"default_width":           "832",
 		"default_height":          "1216",
 		"default_steps":           "20",

@@ -5,11 +5,13 @@ import { settingsPage } from "./pages/settings.js";
 import { promptsPage } from "./pages/prompts.js";
 import { imagesPage } from "./pages/images.js";
 import { logsPage } from "./pages/logs.js";
+import { modelsPage } from "./pages/models.js";
 
 const pages = {
   overview: overviewPage,
   monitoring: monitoringPage,
   settings: settingsPage,
+  models: modelsPage,
   prompts: promptsPage,
   images: imagesPage,
   logs: logsPage,

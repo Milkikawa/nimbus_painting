@@ -15,6 +15,7 @@ type Config struct {
 	UpstreamEndpoint string
 	ImageDir         string
 	PublicBaseURL    string
+	ModelCatalogPath string
 	SessionTTL       time.Duration
 	DefaultTimeout   time.Duration
 }
@@ -28,6 +29,7 @@ func Load() Config {
 		UpstreamEndpoint: env("UPSTREAM_ENDPOINT", ""),
 		ImageDir:         env("IMAGE_DIR", filepath.FromSlash("images")),
 		PublicBaseURL:    env("PUBLIC_BASE_URL", ""),
+		ModelCatalogPath: env("MODEL_CATALOG_PATH", filepath.FromSlash("config/upstream_models.json")),
 		SessionTTL:       time.Duration(envInt("SESSION_TTL_HOURS", 24)) * time.Hour,
 		DefaultTimeout:   time.Duration(envInt("DEFAULT_TIMEOUT_SECONDS", 120)) * time.Second,
 	}

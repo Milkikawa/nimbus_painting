@@ -27,12 +27,19 @@ import (
 type App struct {
 	cfg            config.Config
 	store          *store.Store
+	catalog        *model.CatalogStore
 	start          time.Time
 	activeRequests atomic.Int64
 }
 
-func New(cfg config.Config, db *store.Store) *App {
-	return &App{cfg: cfg, store: db, start: time.Now()}
+func New(cfg config.Config, db *store.Store, catalog *model.CatalogStore) *App {
+	if catalog == nil {
+		catalog = model.NewCatalogStore(cfg.ModelCatalogPath)
+		if err := catalog.LoadOrInit(); err != nil {
+			log.Printf("model_catalog_init_failed error=%v", err)
+		}
+	}
+	return &App{cfg: cfg, store: db, catalog: catalog, start: time.Now()}
 }
 
 func (a *App) Routes() http.Handler {
@@ -48,6 +55,8 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("GET /admin/api/status", a.adminStatus)
 	mux.HandleFunc("GET /admin/api/settings", a.requireAdmin(a.getSettings))
 	mux.HandleFunc("PUT /admin/api/settings", a.requireAdmin(a.updateSettings))
+	mux.HandleFunc("GET /admin/api/models", a.requireAdmin(a.listModels))
+	mux.HandleFunc("PUT /admin/api/models", a.requireAdmin(a.updateModels))
 	mux.HandleFunc("GET /admin/api/monitoring/summary", a.requireAdmin(a.monitoringSummary))
 	mux.HandleFunc("GET /admin/api/prompt-groups", a.requireAdmin(a.listPromptGroups))
 	mux.HandleFunc("POST /admin/api/prompt-groups", a.requireAdmin(a.savePromptGroup))
@@ -69,17 +78,31 @@ func secureHeaders(next http.Handler) http.Handler {
 func (a *App) health(w http.ResponseWriter, r *http.Request) {
 	settings, _ := a.store.GetSettings(r.Context())
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status": "ok", "version": "0.2.0", "database": a.store.Driver(),
+		"status": "ok", "version": "0.5.1", "database": a.store.Driver(),
 		"upstream_configured": settings["upstream_endpoint"] != "",
 		"uptime_seconds":      int(time.Since(a.start).Seconds()),
 	})
 }
 
 func (a *App) models(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": []map[string]any{
+	data := []map[string]any{
 		{"id": "sd-generate", "object": "model", "created": 0, "owned_by": "image-proxy"},
 		{"id": "sd-edit", "object": "model", "created": 0, "owned_by": "image-proxy"},
-	}})
+	}
+	for _, item := range a.catalog.List() {
+		data = append(data, map[string]any{
+			"id":          item.ID,
+			"object":      "model",
+			"created":     0,
+			"owned_by":    "upstream",
+			"index":       item.Index,
+			"name":        item.Name,
+			"type":        item.Type,
+			"available":   item.Available,
+			"image_model": item.Available && item.Type == model.UpstreamModelTypeImage,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": data})
 }
 
 type chatRequest struct {
@@ -128,21 +151,28 @@ func (a *App) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	parsed := parser.Parse(content, settings)
-	if parsed.ModelIndex == 14 {
-		openAIError(w, http.StatusBadRequest, "sd14 is edit-only and cannot be used by sd-generate", "invalid_request_error", "unsupported_model_index")
+	upstreamModel, ok := a.catalog.FindByIndex(parsed.ModelIndex)
+	if !ok {
+		openAIError(w, http.StatusBadRequest, "unsupported model index", "invalid_request_error", "unsupported_model_index")
 		return
 	}
-	if parsed.ModelIndex < 0 || parsed.ModelIndex > 13 {
-		openAIError(w, http.StatusBadRequest, "unsupported model index", "invalid_request_error", "unsupported_model_index")
+	if !upstreamModel.Available || upstreamModel.Type != model.UpstreamModelTypeImage {
+		openAIError(w, http.StatusBadRequest, "model index is not available for image generation", "invalid_request_error", "unsupported_model_index")
 		return
 	}
 	if parsed.Prompt == "" {
 		openAIError(w, http.StatusBadRequest, "missing prompt", "invalid_request_error", "missing_prompt")
 		return
 	}
+	if upstreamModel.Rules != nil && upstreamModel.Rules.ForceSteps != nil {
+		parsed.Steps = *upstreamModel.Rules.ForceSteps
+	}
 
 	positive, negative := a.selectedPrompts(r.Context(), settings)
 	finalPrompt := parser.AppendPositive(parsed.Prompt, positive)
+	if upstreamModel.Rules != nil && !upstreamModel.Rules.AppendDefaultPositivePrompt {
+		finalPrompt = parser.AppendPositive(parsed.Prompt, "")
+	}
 	reqLog := model.RequestLog{ID: store.NewID("req"), CreatedAt: time.Now(), Model: req.Model, ModelIndex: parsed.ModelIndex, RawPrompt: content, FinalPrompt: finalPrompt, NegativePrompt: negative, Width: parsed.Width, Height: parsed.Height, Steps: parsed.Steps, CFG: parsed.CFG, Seed: parsed.Seed, UpstreamEndpoint: settings.UpstreamEndpoint, ImageReturnMode: "upstream_url"}
 	a.activeRequests.Add(1)
 	defer a.activeRequests.Add(-1)
@@ -226,7 +256,13 @@ func (a *App) loadSettings(ctx context.Context) (model.Settings, error) {
 	if err != nil {
 		return model.Settings{}, err
 	}
-	settings := model.Settings{UpstreamEndpoint: items["upstream_endpoint"], DefaultModel: atoi(items["default_model_index"], 4), DefaultWidth: atoi(items["default_width"], 832), DefaultHeight: atoi(items["default_height"], 1216), DefaultSteps: atoi(items["default_steps"], 20), DefaultCFG: atof(items["default_cfg"], 7), MinDimension: atoi(items["min_dimension"], 64), MaxDimension: atoi(items["max_dimension"], 2048), RequestTimeout: atoi(items["request_timeout_seconds"], 120), PositiveGroupID: items["selected_positive_group_id"], NegativeGroupID: items["selected_negative_group_id"], ImageSaveDir: items["image_save_dir"]}
+	defaultModel := atoi(items["default_model_index"], model.DefaultUpstreamModelIndex)
+	if !a.catalog.IsImageGenerationModel(defaultModel) {
+		if fallback, ok := a.catalog.FirstAvailableImageModel(model.DefaultUpstreamModelIndex); ok {
+			defaultModel = fallback
+		}
+	}
+	settings := model.Settings{UpstreamEndpoint: items["upstream_endpoint"], DefaultModel: defaultModel, DefaultWidth: atoi(items["default_width"], 832), DefaultHeight: atoi(items["default_height"], 1216), DefaultSteps: atoi(items["default_steps"], 20), DefaultCFG: atof(items["default_cfg"], 7), MinDimension: atoi(items["min_dimension"], 64), MaxDimension: atoi(items["max_dimension"], 2048), RequestTimeout: atoi(items["request_timeout_seconds"], 120), PositiveGroupID: items["selected_positive_group_id"], NegativeGroupID: items["selected_negative_group_id"], ImageSaveDir: items["image_save_dir"]}
 	if settings.RequestTimeout < 1 {
 		settings.RequestTimeout = 120
 	}
@@ -340,7 +376,7 @@ func (a *App) adminStatus(w http.ResponseWriter, r *http.Request) {
 		"initialized":         hash != "",
 		"authenticated":       authenticated,
 		"upstream_configured": settings["upstream_endpoint"] != "",
-		"version_or_name":     "Nimbus Painting Proxy 0.2.0",
+		"version_or_name":     "Nimbus Painting Proxy 0.5.1",
 		"uptime_seconds":      int(time.Since(a.start).Seconds()),
 	})
 }
@@ -446,6 +482,82 @@ func (a *App) updateSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
+func (a *App) listModels(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, a.catalog.List())
+}
+
+func (a *App) updateModels(w http.ResponseWriter, r *http.Request) {
+	models, err := decodeModelCatalogUpdate(r)
+	if err != nil {
+		openAIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "invalid_json")
+		return
+	}
+	normalizedModels, err := model.NormalizeUpstreamModels(models)
+	if err != nil {
+		openAIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "invalid_models")
+		return
+	}
+
+	defaultModelNeedsUpdate := false
+	defaultModel := model.DefaultUpstreamModelIndex
+	if current, err := a.store.GetSetting(r.Context(), "default_model_index"); err == nil {
+		defaultModel = atoi(current, model.DefaultUpstreamModelIndex)
+	}
+	if !isImageGenerationModelInList(normalizedModels, defaultModel) {
+		fallback, ok := model.FirstAvailableImageModelFrom(normalizedModels, model.DefaultUpstreamModelIndex)
+		if !ok {
+			openAIError(w, http.StatusBadRequest, "model catalog must contain at least one available image model", "invalid_request_error", "invalid_models")
+			return
+		}
+		defaultModel = fallback
+		defaultModelNeedsUpdate = true
+	}
+
+	if defaultModelNeedsUpdate {
+		if err := a.store.SetSetting(r.Context(), "default_model_index", strconv.Itoa(defaultModel)); err != nil {
+			openAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "settings_save_failed")
+			return
+		}
+	}
+	if err := a.catalog.Save(normalizedModels); err != nil {
+		openAIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "invalid_models")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func isImageGenerationModelInList(models []model.UpstreamModel, index int) bool {
+	for _, item := range models {
+		if item.Index == index {
+			return item.Available && item.Type == model.UpstreamModelTypeImage
+		}
+	}
+	return false
+}
+
+func decodeModelCatalogUpdate(r *http.Request) ([]model.UpstreamModel, error) {
+	var raw json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
+		return nil, fmt.Errorf("invalid json")
+	}
+
+	var models []model.UpstreamModel
+	if err := json.Unmarshal(raw, &models); err == nil {
+		return models, nil
+	}
+
+	var wrapped struct {
+		Models []model.UpstreamModel `json:"models"`
+	}
+	if err := json.Unmarshal(raw, &wrapped); err != nil {
+		return nil, fmt.Errorf("invalid json")
+	}
+	if wrapped.Models == nil {
+		return nil, fmt.Errorf("models is required")
+	}
+	return wrapped.Models, nil
+}
+
 func (a *App) validateSettingsUpdate(ctx context.Context, items map[string]string) error {
 	current, err := a.store.GetSettings(ctx)
 	if err != nil {
@@ -480,13 +592,13 @@ func (a *App) validateSettingsUpdate(ctx context.Context, items map[string]strin
 	maxDimension := atoi(merged["max_dimension"], 2048)
 	defaultWidth := atoi(merged["default_width"], 832)
 	defaultHeight := atoi(merged["default_height"], 1216)
-	defaultModel := atoi(merged["default_model_index"], 4)
+	defaultModel := atoi(merged["default_model_index"], model.DefaultUpstreamModelIndex)
 	defaultSteps := atoi(merged["default_steps"], 20)
 	defaultCFG := atof(merged["default_cfg"], 7)
 	requestTimeout := atoi(merged["request_timeout_seconds"], 120)
 
-	if defaultModel < 0 || defaultModel > 13 {
-		return fmt.Errorf("default_model_index must be between 0 and 13")
+	if !a.catalog.IsImageGenerationModel(defaultModel) {
+		return fmt.Errorf("default_model_index must be an available image model index between 0 and %d", a.catalog.MaxIndex())
 	}
 	if minDimension < 1 || maxDimension < 1 || minDimension > maxDimension {
 		return fmt.Errorf("min_dimension and max_dimension must be positive and min_dimension must not exceed max_dimension")

@@ -11,11 +11,17 @@ import (
 
 	"nimbus-painting/internal/app"
 	"nimbus-painting/internal/config"
+	"nimbus-painting/internal/model"
 	"nimbus-painting/internal/store"
 )
 
 func main() {
 	cfg := config.Load()
+
+	catalog := model.NewCatalogStore(cfg.ModelCatalogPath)
+	if err := catalog.LoadOrInit(); err != nil {
+		log.Fatalf("model catalog init failed: %v", err)
+	}
 
 	db, err := store.Open(cfg)
 	if err != nil {
@@ -29,7 +35,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:              cfg.ListenAddr,
-		Handler:           app.New(cfg, db).Routes(),
+		Handler:           app.New(cfg, db, catalog).Routes(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
