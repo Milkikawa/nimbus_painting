@@ -11,11 +11,17 @@ import (
 
 	"nimbus-painting/internal/app"
 	"nimbus-painting/internal/config"
+	"nimbus-painting/internal/model"
 	"nimbus-painting/internal/store"
 )
 
 func main() {
 	cfg := config.Load()
+
+	catalog := model.NewCatalogStore(cfg.ModelCatalogPath)
+	if err := catalog.LoadOrInit(); err != nil {
+		log.Fatalf("model catalog init failed: %v", err)
+	}
 
 	db, err := store.Open(cfg)
 	if err != nil {
