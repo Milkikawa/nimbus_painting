@@ -1497,3 +1497,107 @@
     gap: 12px;
   }
 }
+
+/* ---- 模型目录 ---- */
+.model-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.model-boundary-note {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px 14px;
+  align-items: start;
+  padding: 14px 16px;
+  border: 1px solid rgba(255, 159, 10, 0.32);
+  border-radius: 16px;
+  background: rgba(255, 159, 10, 0.1);
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.model-boundary-note strong {
+  color: var(--text-main);
+  white-space: nowrap;
+}
+
+.model-boundary-note code {
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: var(--color-surface-subtle);
+  color: var(--text-main);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.models-section {
+  overflow: hidden;
+}
+
+.models-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+}
+
+.models-table {
+  width: 100%;
+  min-width: 980px;
+  border-collapse: collapse;
+}
+
+.models-table th,
+.models-table td {
+  padding: 10px;
+  border-bottom: 1px solid var(--border-color);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.models-table th {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.models-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.model-input {
+  width: 100%;
+  min-width: 120px;
+}
+
+.model-index,
+.model-force-steps {
+  min-width: 88px;
+}
+
+.model-check-cell {
+  text-align: center;
+}
+
+.model-check-cell input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+}
+
+@media (max-width: 768px) {
+  .model-boundary-note {
+    grid-template-columns: 1fr;
+  }
+
+  .model-actions {
+    width: 100%;
+  }
+
+  .model-actions button {
+    flex: 1;
+  }
+}

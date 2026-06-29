@@ -1,10 +1,23 @@
-﻿import { api, fmtDate, text } from '../api.js';
+﻿import { api, fmtDate, text } from "../api.js";
 
-const settingIds = ['upstream_endpoint','default_model_index','default_width','default_height','default_steps','default_cfg','min_dimension','max_dimension','request_timeout_seconds','image_save_dir','selected_positive_group_id','selected_negative_group_id'];
+const settingIds = [
+  "upstream_endpoint",
+  "default_model_index",
+  "default_width",
+  "default_height",
+  "default_steps",
+  "default_cfg",
+  "min_dimension",
+  "max_dimension",
+  "request_timeout_seconds",
+  "image_save_dir",
+  "selected_positive_group_id",
+  "selected_negative_group_id",
+];
 
 export const settingsPage = {
-  title: '基础设置',
-  eyebrow: '配置',
+  title: "基础设置",
+  eyebrow: "配置",
   async render(ctx) {
     ctx.root.innerHTML = `
       <div class="settings-page-header">
@@ -30,7 +43,7 @@ export const settingsPage = {
         <div class="settings-row">
           <div class="settings-row-label">
             <div class="label-main">默认模型编号</div>
-            <div class="label-desc">请求未指定模型时使用的默认模型</div>
+            <div class="label-desc">请求未指定模型时使用的默认模型 index；请在模型目录中确认该编号存在</div>
           </div>
           <div class="settings-row-input">
             <input id="default_model_index" inputmode="numeric" placeholder="4">
@@ -134,66 +147,81 @@ export const settingsPage = {
         </div>
       </div>`;
 
-    const saveBtn = document.getElementById('saveSettings');
+    const saveBtn = document.getElementById("saveSettings");
     let dirty = false;
 
     // Mark dirty on any input change
     settingIds.forEach((id) => {
       const el = document.getElementById(id);
-      if (el) el.addEventListener('input', () => {
-        if (!dirty) {
-          dirty = true;
-          saveBtn.classList.add('dirty');
-        }
-      });
+      if (el)
+        el.addEventListener("input", () => {
+          if (!dirty) {
+            dirty = true;
+            saveBtn.classList.add("dirty");
+          }
+        });
     });
 
     // Save handler
-    saveBtn.addEventListener('click', async () => {
-      saveBtn.classList.add('saving');
-      saveBtn.textContent = '保存中...';
+    saveBtn.addEventListener("click", async () => {
+      saveBtn.classList.add("saving");
+      saveBtn.textContent = "保存中...";
       try {
         const body = {};
-        settingIds.forEach((id) => { body[id] = document.getElementById(id).value; });
-        await api('/admin/api/settings', { method: 'PUT', body: JSON.stringify(body) });
-        ctx.toast('设置已保存', 'success');
+        settingIds.forEach((id) => {
+          body[id] = document.getElementById(id).value;
+        });
+        await api("/admin/api/settings", {
+          method: "PUT",
+          body: JSON.stringify(body),
+        });
+        ctx.toast("设置已保存", "success");
         ctx.refreshStatus();
         dirty = false;
-        saveBtn.classList.remove('dirty');
+        saveBtn.classList.remove("dirty");
       } catch (error) {
-        ctx.toast(error.message || '保存失败', 'error');
+        ctx.toast(error.message || "保存失败", "error");
       } finally {
-        saveBtn.classList.remove('saving');
-        saveBtn.textContent = '保存设置';
+        saveBtn.classList.remove("saving");
+        saveBtn.textContent = "保存设置";
       }
     });
 
     await loadSettingsForm(ctx);
-  }
+  },
 };
 
 export async function loadSettingsForm(ctx) {
-  const [settings, groups] = await Promise.all([api('/admin/api/settings'), api('/admin/api/prompt-groups')]);
-  const positive = document.getElementById('selected_positive_group_id');
-  const negative = document.getElementById('selected_negative_group_id');
+  const [settings, groups] = await Promise.all([
+    api("/admin/api/settings"),
+    api("/admin/api/prompt-groups"),
+  ]);
+  const positive = document.getElementById("selected_positive_group_id");
+  const negative = document.getElementById("selected_negative_group_id");
   positive.innerHTML = '<option value="">不使用</option>';
   negative.innerHTML = '<option value="">不使用</option>';
   groups.forEach((group) => {
     const option = new Option(group.name, group.id);
-    (group.type === 'positive' ? positive : negative).add(option);
+    (group.type === "positive" ? positive : negative).add(option);
   });
   settingIds.forEach((id) => {
     const el = document.getElementById(id);
-    if (el) el.value = settings[id] ?? '';
+    if (el) el.value = settings[id] ?? "";
   });
 }
 
 export async function settingsSummary() {
-  const settings = await api('/admin/api/settings');
+  const settings = await api("/admin/api/settings");
   return {
-    endpoint: settings.upstream_endpoint ? '已配置' : '未配置',
+    endpoint: settings.upstream_endpoint ? "已配置" : "未配置",
     model: `sd${settings.default_model_index || 4}`,
-    size: `${settings.default_width || 832} × ${settings.default_height || 1216}`,
-    updated: text(settings.request_timeout_seconds ? `${settings.request_timeout_seconds} 秒超时` : '')
+    size: `${settings.default_width || 832} × ${
+      settings.default_height || 1216
+    }`,
+    updated: text(
+      settings.request_timeout_seconds
+        ? `${settings.request_timeout_seconds} 秒超时`
+        : ""
+    ),
   };
 }
