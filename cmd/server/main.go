@@ -35,7 +35,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:              cfg.ListenAddr,
-		Handler:           app.New(cfg, db).Routes(),
+		Handler:           app.New(cfg, db, catalog).Routes(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
