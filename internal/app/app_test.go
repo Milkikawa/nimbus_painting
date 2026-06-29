@@ -264,6 +264,49 @@ func TestAdminModelsAPIDisablingImageModelRejectsRequests(t *testing.T) {
 	}, http.StatusBadRequest, nil, nil, map[string]string{"Authorization": "Bearer test-key"})
 }
 
+func TestAdminModelsAPIRejectsCatalogWithoutAvailableImageModel(t *testing.T) {
+	application, handler := newTestApp(t)
+	requestJSON(t, handler, http.MethodPost, "/admin/init", map[string]string{"password": "password123"}, http.StatusOK, nil, nil)
+	cookies := requestJSON(t, handler, http.MethodPost, "/admin/login", map[string]string{"password": "password123"}, http.StatusOK, nil, nil)
+
+	requestJSON(t, handler, http.MethodPut, "/admin/api/models", []model.UpstreamModel{}, http.StatusBadRequest, nil, cookies)
+
+	models := application.catalog.List()
+	for i := range models {
+		models[i].Available = false
+	}
+	requestJSON(t, handler, http.MethodPut, "/admin/api/models", map[string]any{"models": models}, http.StatusBadRequest, nil, cookies)
+
+	requestJSON(t, handler, http.MethodPut, "/admin/api/models", []model.UpstreamModel{{Index: 30, ID: "video30", Name: "video", Type: model.UpstreamModelTypeVideo, Available: true}}, http.StatusBadRequest, nil, cookies)
+}
+
+func TestAdminModelsAPIDisablingDefaultModelFallsBack(t *testing.T) {
+	application, handler := newTestApp(t)
+	requestJSON(t, handler, http.MethodPost, "/admin/init", map[string]string{"password": "password123"}, http.StatusOK, nil, nil)
+	cookies := requestJSON(t, handler, http.MethodPost, "/admin/login", map[string]string{"password": "password123"}, http.StatusOK, nil, nil)
+
+	if err := application.store.SetSetting(context.Background(), "default_model_index", "4"); err != nil {
+		t.Fatalf("set default model: %v", err)
+	}
+	models := []model.UpstreamModel{
+		{Index: 4, ID: "sd4", Name: "disabled default", Type: model.UpstreamModelTypeImage, Available: false},
+		{Index: 9, ID: " sd9 ", Name: " fallback ", Type: " image ", Available: true},
+	}
+	requestJSON(t, handler, http.MethodPut, "/admin/api/models", map[string]any{"models": models}, http.StatusOK, nil, cookies)
+
+	current, err := application.store.GetSetting(context.Background(), "default_model_index")
+	if err != nil {
+		t.Fatalf("get default model: %v", err)
+	}
+	if current != "9" {
+		t.Fatalf("expected default model fallback to 9, got %q", current)
+	}
+	got, ok := application.catalog.FindByIndex(9)
+	if !ok || got.ID != "sd9" || got.Name != "fallback" || got.Type != model.UpstreamModelTypeImage {
+		t.Fatalf("expected normalized fallback model, got %#v ok=%v", got, ok)
+	}
+}
+
 func TestAdminModelsAPIRulesAffectRequestChain(t *testing.T) {
 	application, handler := newTestApp(t)
 	requestJSON(t, handler, http.MethodPost, "/admin/init", map[string]string{"password": "password123"}, http.StatusOK, nil, nil)

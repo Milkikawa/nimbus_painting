@@ -65,9 +65,12 @@ var DefaultUpstreamModels = []UpstreamModel{
 	{Index: 18, ID: "sd18", Name: "[动态加强-实验性]视频生成模型 rpwan2.2-14B-fast(5秒视频)", Type: UpstreamModelTypeVideo, Available: false, Rules: defaultUpstreamModelRules()},
 }
 
+// UpstreamModels is a compatibility snapshot of the built-in default catalog.
+// Runtime request validation should use CatalogStore instead of this static slice.
 var UpstreamModels = cloneUpstreamModels(DefaultUpstreamModels)
 
 func defaultUpstreamModelRules() *UpstreamModelRules {
+
 	return &UpstreamModelRules{AppendDefaultPositivePrompt: true}
 }
 
@@ -76,8 +79,11 @@ func zImageModelRules() *UpstreamModelRules {
 	return &UpstreamModelRules{ForceSteps: &steps, AppendDefaultPositivePrompt: false}
 }
 
+// UpstreamModelByIndex looks up the built-in default catalog only.
+// Runtime request validation should use CatalogStore.FindByIndex.
 func UpstreamModelByIndex(index int) (UpstreamModel, bool) {
 	for _, item := range DefaultUpstreamModels {
+
 		if item.Index == index {
 			return item, true
 		}
@@ -85,13 +91,19 @@ func UpstreamModelByIndex(index int) (UpstreamModel, bool) {
 	return UpstreamModel{}, false
 }
 
+// IsImageGenerationModel checks the built-in default catalog only.
+// Runtime request validation should use CatalogStore.IsImageGenerationModel.
 func IsImageGenerationModel(index int) bool {
 	item, ok := UpstreamModelByIndex(index)
+
 	return ok && item.Available && item.Type == UpstreamModelTypeImage
 }
 
+// MaxUpstreamModelIndex returns the highest index in the built-in default catalog only.
+// Runtime settings validation should use CatalogStore.MaxIndex.
 func MaxUpstreamModelIndex() int {
 	max := -1
+
 	for _, item := range DefaultUpstreamModels {
 		if item.Index > max {
 			max = item.Index

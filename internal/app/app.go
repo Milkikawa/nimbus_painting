@@ -78,7 +78,7 @@ func secureHeaders(next http.Handler) http.Handler {
 func (a *App) health(w http.ResponseWriter, r *http.Request) {
 	settings, _ := a.store.GetSettings(r.Context())
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status": "ok", "version": "0.5.0", "database": a.store.Driver(),
+		"status": "ok", "version": "0.5.1", "database": a.store.Driver(),
 		"upstream_configured": settings["upstream_endpoint"] != "",
 		"uptime_seconds":      int(time.Since(a.start).Seconds()),
 	})
@@ -258,7 +258,9 @@ func (a *App) loadSettings(ctx context.Context) (model.Settings, error) {
 	}
 	defaultModel := atoi(items["default_model_index"], model.DefaultUpstreamModelIndex)
 	if !a.catalog.IsImageGenerationModel(defaultModel) {
-		defaultModel = a.catalog.FirstAvailableImageModel(model.DefaultUpstreamModelIndex)
+		if fallback, ok := a.catalog.FirstAvailableImageModel(model.DefaultUpstreamModelIndex); ok {
+			defaultModel = fallback
+		}
 	}
 	settings := model.Settings{UpstreamEndpoint: items["upstream_endpoint"], DefaultModel: defaultModel, DefaultWidth: atoi(items["default_width"], 832), DefaultHeight: atoi(items["default_height"], 1216), DefaultSteps: atoi(items["default_steps"], 20), DefaultCFG: atof(items["default_cfg"], 7), MinDimension: atoi(items["min_dimension"], 64), MaxDimension: atoi(items["max_dimension"], 2048), RequestTimeout: atoi(items["request_timeout_seconds"], 120), PositiveGroupID: items["selected_positive_group_id"], NegativeGroupID: items["selected_negative_group_id"], ImageSaveDir: items["image_save_dir"]}
 	if settings.RequestTimeout < 1 {
@@ -374,7 +376,7 @@ func (a *App) adminStatus(w http.ResponseWriter, r *http.Request) {
 		"initialized":         hash != "",
 		"authenticated":       authenticated,
 		"upstream_configured": settings["upstream_endpoint"] != "",
-		"version_or_name":     "Nimbus Painting Proxy 0.5.0",
+		"version_or_name":     "Nimbus Painting Proxy 0.5.1",
 		"uptime_seconds":      int(time.Since(a.start).Seconds()),
 	})
 }
@@ -490,21 +492,47 @@ func (a *App) updateModels(w http.ResponseWriter, r *http.Request) {
 		openAIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "invalid_json")
 		return
 	}
-	if err := a.catalog.Save(models); err != nil {
+	normalizedModels, err := model.NormalizeUpstreamModels(models)
+	if err != nil {
 		openAIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "invalid_models")
 		return
 	}
+
+	defaultModelNeedsUpdate := false
+	defaultModel := model.DefaultUpstreamModelIndex
 	if current, err := a.store.GetSetting(r.Context(), "default_model_index"); err == nil {
-		defaultModel := atoi(current, model.DefaultUpstreamModelIndex)
-		if !a.catalog.IsImageGenerationModel(defaultModel) {
-			fallback := a.catalog.FirstAvailableImageModel(model.DefaultUpstreamModelIndex)
-			if err := a.store.SetSetting(r.Context(), "default_model_index", strconv.Itoa(fallback)); err != nil {
-				openAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "settings_save_failed")
-				return
-			}
+		defaultModel = atoi(current, model.DefaultUpstreamModelIndex)
+	}
+	if !isImageGenerationModelInList(normalizedModels, defaultModel) {
+		fallback, ok := model.FirstAvailableImageModelFrom(normalizedModels, model.DefaultUpstreamModelIndex)
+		if !ok {
+			openAIError(w, http.StatusBadRequest, "model catalog must contain at least one available image model", "invalid_request_error", "invalid_models")
+			return
+		}
+		defaultModel = fallback
+		defaultModelNeedsUpdate = true
+	}
+
+	if defaultModelNeedsUpdate {
+		if err := a.store.SetSetting(r.Context(), "default_model_index", strconv.Itoa(defaultModel)); err != nil {
+			openAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "settings_save_failed")
+			return
 		}
 	}
+	if err := a.catalog.Save(normalizedModels); err != nil {
+		openAIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "invalid_models")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func isImageGenerationModelInList(models []model.UpstreamModel, index int) bool {
+	for _, item := range models {
+		if item.Index == index {
+			return item.Available && item.Type == model.UpstreamModelTypeImage
+		}
+	}
+	return false
 }
 
 func decodeModelCatalogUpdate(r *http.Request) ([]model.UpstreamModel, error) {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -36,10 +37,11 @@ func (s *CatalogStore) LoadOrInit() error {
 		if !os.IsNotExist(err) {
 			return fmt.Errorf("read model catalog: %w", err)
 		}
-		catalog := ModelCatalog{Version: DefaultCatalogVersion, Models: cloneUpstreamModels(DefaultUpstreamModels)}
-		if err := validateAndDefaultModels(catalog.Models); err != nil {
+		models, err := NormalizeUpstreamModels(DefaultUpstreamModels)
+		if err != nil {
 			return err
 		}
+		catalog := ModelCatalog{Version: DefaultCatalogVersion, Models: models}
 		if err := s.writeCatalogLocked(catalog); err != nil {
 			return err
 		}
@@ -54,9 +56,11 @@ func (s *CatalogStore) LoadOrInit() error {
 	if catalog.Version == 0 {
 		catalog.Version = DefaultCatalogVersion
 	}
-	if err := validateAndDefaultModels(catalog.Models); err != nil {
+	models, err := NormalizeUpstreamModels(catalog.Models)
+	if err != nil {
 		return err
 	}
+	catalog.Models = models
 	s.catalog = catalog
 	return nil
 }
@@ -100,30 +104,24 @@ func (s *CatalogStore) MaxIndex() int {
 	return max
 }
 
-func (s *CatalogStore) FirstAvailableImageModel(fallback int) int {
-	if s.IsImageGenerationModel(fallback) {
-		return fallback
-	}
-
-	for _, item := range s.List() {
-		if item.Available && item.Type == UpstreamModelTypeImage {
-			return item.Index
-		}
-	}
-	return fallback
+func (s *CatalogStore) FirstAvailableImageModel(fallback int) (int, bool) {
+	return FirstAvailableImageModelFrom(s.List(), fallback)
 }
 
 func (s *CatalogStore) Save(models []UpstreamModel) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	models = cloneUpstreamModels(models)
-	if err := validateAndDefaultModels(models); err != nil {
+	models, err := NormalizeUpstreamModels(models)
+	if err != nil {
 		return err
 	}
 	catalog := ModelCatalog{Version: DefaultCatalogVersion, Models: models}
 	if s.catalog.Version > 0 {
 		catalog.Version = s.catalog.Version
+	}
+	if reflect.DeepEqual(s.catalog, catalog) {
+		return nil
 	}
 	if err := s.writeCatalogLocked(catalog); err != nil {
 		return err
@@ -171,10 +169,40 @@ func (s *CatalogStore) writeCatalogLocked(catalog ModelCatalog) error {
 	return nil
 }
 
+func NormalizeUpstreamModels(models []UpstreamModel) ([]UpstreamModel, error) {
+	models = cloneUpstreamModels(models)
+	if err := validateAndDefaultModels(models); err != nil {
+		return nil, err
+	}
+	return models, nil
+}
+
+func FirstAvailableImageModelFrom(models []UpstreamModel, fallback int) (int, bool) {
+	for _, item := range models {
+		if item.Index == fallback && item.Available && item.Type == UpstreamModelTypeImage {
+			return fallback, true
+		}
+	}
+	for _, item := range models {
+		if item.Available && item.Type == UpstreamModelTypeImage {
+			return item.Index, true
+		}
+	}
+	return 0, false
+}
+
 func validateAndDefaultModels(models []UpstreamModel) error {
+	if len(models) == 0 {
+		return fmt.Errorf("model catalog must contain at least one model")
+	}
+
 	seen := make(map[int]struct{}, len(models))
+	hasAvailableImageModel := false
 	for i := range models {
 		item := &models[i]
+		item.ID = strings.TrimSpace(item.ID)
+		item.Name = strings.TrimSpace(item.Name)
+		item.Type = strings.TrimSpace(item.Type)
 		if item.Index < 0 {
 			return fmt.Errorf("model index must be >= 0: %d", item.Index)
 		}
@@ -182,10 +210,10 @@ func validateAndDefaultModels(models []UpstreamModel) error {
 			return fmt.Errorf("duplicate model index: %d", item.Index)
 		}
 		seen[item.Index] = struct{}{}
-		if strings.TrimSpace(item.ID) == "" {
+		if item.ID == "" {
 			return fmt.Errorf("model %d id is required", item.Index)
 		}
-		if strings.TrimSpace(item.Name) == "" {
+		if item.Name == "" {
 			return fmt.Errorf("model %d name is required", item.Index)
 		}
 		if !allowedUpstreamModelType(item.Type) {
@@ -197,6 +225,12 @@ func validateAndDefaultModels(models []UpstreamModel) error {
 		if item.Rules.ForceSteps != nil && *item.Rules.ForceSteps <= 0 {
 			return fmt.Errorf("model %d rules.force_steps must be > 0", item.Index)
 		}
+		if item.Available && item.Type == UpstreamModelTypeImage {
+			hasAvailableImageModel = true
+		}
+	}
+	if !hasAvailableImageModel {
+		return fmt.Errorf("model catalog must contain at least one available image model")
 	}
 	return nil
 }
