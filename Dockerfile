@@ -13,7 +13,7 @@ RUN apk add --no-cache ca-certificates tzdata
 WORKDIR /app
 COPY --from=build /out/nimbus-painting /app/nimbus-painting
 COPY web /app/web
-ENV LISTEN_ADDR=:4030 DB_DRIVER=sqlite SQLITE_PATH=/app/config/app.db IMAGE_DIR=/app/images
+ENV LISTEN_ADDR=:4030 DB_DRIVER=sqlite SQLITE_PATH=/app/config/app.db IMAGE_DIR=/app/images MODEL_CATALOG_PATH=/app/config/upstream_models.json
 VOLUME ["/app/config", "/app/images"]
 EXPOSE 4030
 CMD ["/app/nimbus-painting"]
