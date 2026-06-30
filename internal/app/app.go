@@ -85,24 +85,7 @@ func (a *App) health(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) models(w http.ResponseWriter, r *http.Request) {
-	data := []map[string]any{
-		{"id": "sd-generate", "object": "model", "created": 0, "owned_by": "image-proxy"},
-		{"id": "sd-edit", "object": "model", "created": 0, "owned_by": "image-proxy"},
-	}
-	for _, item := range a.catalog.List() {
-		data = append(data, map[string]any{
-			"id":          item.ID,
-			"object":      "model",
-			"created":     0,
-			"owned_by":    "upstream",
-			"index":       item.Index,
-			"name":        item.Name,
-			"type":        item.Type,
-			"available":   item.Available,
-			"image_model": item.Available && item.Type == model.UpstreamModelTypeImage,
-		})
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": data})
+	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": downstreamModelList()})
 }
 
 type chatRequest struct {
@@ -126,11 +109,11 @@ func (a *App) chatCompletions(w http.ResponseWriter, r *http.Request) {
 		openAIError(w, http.StatusBadRequest, "missing prompt", "invalid_request_error", "missing_prompt")
 		return
 	}
-	if req.Model == "sd-edit" {
+	if req.Model == downstreamModelEdit {
 		openAIError(w, http.StatusBadRequest, "sd-edit is reserved but not implemented yet.", "invalid_request_error", "edit_not_implemented")
 		return
 	}
-	if req.Model != "sd-generate" {
+	if req.Model != downstreamModelGenerate {
 		openAIError(w, http.StatusBadRequest, "invalid model", "invalid_request_error", "invalid_model")
 		return
 	}
@@ -151,12 +134,12 @@ func (a *App) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	parsed := parser.Parse(content, settings)
-	upstreamModel, ok := a.catalog.FindByIndex(parsed.ModelIndex)
-	if !ok {
+	upstreamModel, found, available := a.catalog.ResolveImageModel(parsed.ModelIndex)
+	if !found {
 		openAIError(w, http.StatusBadRequest, "unsupported model index", "invalid_request_error", "unsupported_model_index")
 		return
 	}
-	if !upstreamModel.Available || upstreamModel.Type != model.UpstreamModelTypeImage {
+	if !available {
 		openAIError(w, http.StatusBadRequest, "model index is not available for image generation", "invalid_request_error", "unsupported_model_index")
 		return
 	}
@@ -503,7 +486,7 @@ func (a *App) updateModels(w http.ResponseWriter, r *http.Request) {
 	if current, err := a.store.GetSetting(r.Context(), "default_model_index"); err == nil {
 		defaultModel = atoi(current, model.DefaultUpstreamModelIndex)
 	}
-	if !isImageGenerationModelInList(normalizedModels, defaultModel) {
+	if !model.IsAvailableImageModelInList(normalizedModels, defaultModel) {
 		fallback, ok := model.FirstAvailableImageModelFrom(normalizedModels, model.DefaultUpstreamModelIndex)
 		if !ok {
 			openAIError(w, http.StatusBadRequest, "model catalog must contain at least one available image model", "invalid_request_error", "invalid_models")
@@ -524,15 +507,6 @@ func (a *App) updateModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-}
-
-func isImageGenerationModelInList(models []model.UpstreamModel, index int) bool {
-	for _, item := range models {
-		if item.Index == index {
-			return item.Available && item.Type == model.UpstreamModelTypeImage
-		}
-	}
-	return false
 }
 
 func decodeModelCatalogUpdate(r *http.Request) ([]model.UpstreamModel, error) {
