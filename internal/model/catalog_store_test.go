@@ -106,3 +106,35 @@ func TestFirstAvailableImageModelReturnsFalseWhenUnavailable(t *testing.T) {
 		t.Fatalf("expected fallback image model, got index=%d ok=%v", got, ok)
 	}
 }
+
+func TestCatalogStoreResolveImageModelReportsFoundAndAvailability(t *testing.T) {
+	store := NewCatalogStore(filepath.Join(t.TempDir(), "models.json"))
+	models := []UpstreamModel{
+		{Index: 1, ID: "sd1", Name: "image", Type: UpstreamModelTypeImage, Available: true},
+		{Index: 2, ID: "sd2", Name: "disabled", Type: UpstreamModelTypeImage, Available: false},
+		{Index: 3, ID: "video3", Name: "video", Type: UpstreamModelTypeVideo, Available: true},
+	}
+	if err := store.Save(models); err != nil {
+		t.Fatalf("save models: %v", err)
+	}
+
+	got, found, available := store.ResolveImageModel(1)
+	if !found || !available || got.Index != 1 {
+		t.Fatalf("expected available image model, got %#v found=%v available=%v", got, found, available)
+	}
+
+	got, found, available = store.ResolveImageModel(2)
+	if !found || available || got.Index != 2 {
+		t.Fatalf("expected disabled image model to be found but unavailable, got %#v found=%v available=%v", got, found, available)
+	}
+
+	got, found, available = store.ResolveImageModel(3)
+	if !found || available || got.Index != 3 {
+		t.Fatalf("expected non-image model to be found but unavailable, got %#v found=%v available=%v", got, found, available)
+	}
+
+	got, found, available = store.ResolveImageModel(99)
+	if found || available || got.Index != 0 {
+		t.Fatalf("expected missing model, got %#v found=%v available=%v", got, found, available)
+	}
+}
