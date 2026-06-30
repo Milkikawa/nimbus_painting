@@ -225,6 +225,36 @@ func TestChatCompletionReturnsUpstreamImageURLAndLogsMetadata(t *testing.T) {
 	}
 }
 
+func TestModelsEndpointReturnsOnlyProxyModels(t *testing.T) {
+	_, handler := newTestApp(t)
+
+	var response struct {
+		Object string           `json:"object"`
+		Data   []map[string]any `json:"data"`
+	}
+	requestJSON(t, handler, http.MethodGet, "/v1/models", nil, http.StatusOK, &response, nil)
+
+	if response.Object != "list" {
+		t.Fatalf("expected object=list, got %#v", response.Object)
+	}
+	if len(response.Data) != 2 {
+		t.Fatalf("expected exactly two proxy models, got %#v", response.Data)
+	}
+
+	wantIDs := []string{"sd-generate", "sd-edit"}
+	for i, wantID := range wantIDs {
+		item := response.Data[i]
+		if item["id"] != wantID || item["object"] != "model" || item["owned_by"] != "image-proxy" || item["created"] != float64(0) {
+			t.Fatalf("unexpected proxy model at index %d: %#v", i, item)
+		}
+	}
+	for _, item := range response.Data {
+		if item["id"] == "sd0" || item["owned_by"] == "upstream" {
+			t.Fatalf("/v1/models must not expose upstream catalog entries: %#v", response.Data)
+		}
+	}
+}
+
 func TestAdminModelsAPIRequiresAuthAndReturnsModels(t *testing.T) {
 	_, handler := newTestApp(t)
 	requestJSON(t, handler, http.MethodGet, "/admin/api/models", nil, http.StatusUnauthorized, nil, nil)
@@ -239,6 +269,9 @@ func TestAdminModelsAPIRequiresAuthAndReturnsModels(t *testing.T) {
 	}
 	if models[0].Index > models[len(models)-1].Index {
 		t.Fatalf("expected models sorted by index: %#v", models)
+	}
+	if models[0].ID != "sd0" || models[0].Index != 0 {
+		t.Fatalf("expected admin API to return full upstream catalog including sd0, got first model %#v", models[0])
 	}
 }
 

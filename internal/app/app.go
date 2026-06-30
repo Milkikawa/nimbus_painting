@@ -89,19 +89,6 @@ func (a *App) models(w http.ResponseWriter, r *http.Request) {
 		{"id": "sd-generate", "object": "model", "created": 0, "owned_by": "image-proxy"},
 		{"id": "sd-edit", "object": "model", "created": 0, "owned_by": "image-proxy"},
 	}
-	for _, item := range a.catalog.List() {
-		data = append(data, map[string]any{
-			"id":          item.ID,
-			"object":      "model",
-			"created":     0,
-			"owned_by":    "upstream",
-			"index":       item.Index,
-			"name":        item.Name,
-			"type":        item.Type,
-			"available":   item.Available,
-			"image_model": item.Available && item.Type == model.UpstreamModelTypeImage,
-		})
-	}
 	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": data})
 }
 
