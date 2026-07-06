@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -36,6 +37,12 @@ type TaskStats struct {
 	Success       int        `json:"success"`
 	Failed        int        `json:"failed"`
 	LatestRequest *time.Time `json:"latest_request"`
+}
+
+type ModelUsageEntry struct {
+	Name    string `json:"name"`
+	Count   int    `json:"count"`
+	Success int    `json:"success"`
 }
 
 func Open(cfg config.Config) (*Store, error) {
@@ -426,6 +433,46 @@ func (s *Store) TaskStats(ctx context.Context) (TaskStats, error) {
 		stats.LatestRequest = &parsed
 	}
 	return stats, nil
+}
+
+func (s *Store) ModelUsageStats(ctx context.Context) ([]ModelUsageEntry, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT COALESCE(upstream_model_name,''), model_index, COUNT(*), COALESCE(SUM(CASE WHEN success<>0 THEN 1 ELSE 0 END),0) FROM request_logs GROUP BY upstream_model_name, model_index`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	merged := make(map[string]*ModelUsageEntry)
+	for rows.Next() {
+		var name string
+		var index, count, success int
+		if err := rows.Scan(&name, &index, &count, &success); err != nil {
+			return nil, err
+		}
+		key := name
+		if key == "" {
+			key = fmt.Sprintf("sd%d", index)
+		}
+		entry, ok := merged[key]
+		if !ok {
+			entry = &ModelUsageEntry{Name: key}
+			merged[key] = entry
+		}
+		entry.Count += count
+		entry.Success += success
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	result := make([]ModelUsageEntry, 0, len(merged))
+	for _, entry := range merged {
+		result = append(result, *entry)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Count > result[j].Count
+	})
+	return result, nil
 }
 
 func (s *Store) MarkImageDeleted(ctx context.Context, id string) (string, error) {
