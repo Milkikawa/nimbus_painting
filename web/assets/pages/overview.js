@@ -42,8 +42,10 @@ async function loadOverview(ctx) {
     kpis.push({ label: '图片总数', value: String(monitoring.images?.total ?? 0) });
     kpis.push({ label: '最近请求', value: fmtDate(monitoring.tasks?.latest_request) });
 
-    // Model statistics from logs
-    const modelStats = computeModelStats(logs);
+    // Model statistics: server-side all-time aggregation grouped by upstream model_name
+    // (index-reuse safe). Denominator monitoring.tasks.total is also all-time, so the
+    // per-model percentage stays consistent with the counts.
+    const modelStats = Array.isArray(monitoring.model_usage) ? monitoring.model_usage : [];
 
     // Recent activity from logs (last 5)
     const recentLogs = logs.slice(0, 5);
@@ -93,23 +95,6 @@ function kpiCard({ label, value, accent = '' }) {
 
 function statTile(label, value) {
   return `<div class="stat-tile"><span class="stat-label">${escapeHTML(label)}</span><span class="stat-value">${escapeHTML(value)}</span></div>`;
-}
-
-function computeModelStats(logs) {
-  const map = new Map();
-  for (const log of logs) {
-    const modelName = log.UpstreamModelName || log.upstream_model_name || '';
-    const modelIndex = log.ModelIndex ?? log.model_index ?? '';
-    const key = modelName || `sd${modelIndex}`;
-    if (!key || key === 'sd') continue;
-    if (!map.has(key)) {
-      map.set(key, { name: key, modelIndex, count: 0, success: 0 });
-    }
-    const entry = map.get(key);
-    entry.count++;
-    if (log.Success ?? log.success) entry.success++;
-  }
-  return Array.from(map.values()).sort((a, b) => b.count - a.count);
 }
 
 function renderModelStats(stats, total) {

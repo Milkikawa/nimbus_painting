@@ -657,6 +657,11 @@ func (a *App) monitoringSummary(w http.ResponseWriter, r *http.Request) {
 		openAIError(w, 500, err.Error(), "server_error", "task_stats_failed")
 		return
 	}
+	modelUsage, err := a.store.ModelUsageStats(r.Context())
+	if err != nil {
+		openAIError(w, 500, err.Error(), "server_error", "model_usage_failed")
+		return
+	}
 
 	// 监测面板只做当前快照：不启动后台采样，不写入数据库，避免额外资源开销。
 	successRate := 0.0
@@ -690,6 +695,7 @@ func (a *App) monitoringSummary(w http.ResponseWriter, r *http.Request) {
 			"value":      successRate,
 			"percentage": successRate * 100,
 		},
+		"model_usage": modelUsage,
 	})
 }
 

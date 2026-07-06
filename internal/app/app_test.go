@@ -120,6 +120,68 @@ func TestMonitoringSummaryEmptyStats(t *testing.T) {
 	}
 }
 
+func TestMonitoringSummaryModelUsage(t *testing.T) {
+	application, handler := newTestApp(t)
+	requestJSON(t, handler, http.MethodPost, "/admin/init", map[string]string{"password": "password123"}, http.StatusOK, nil, nil)
+	cookies := requestJSON(t, handler, http.MethodPost, "/admin/login", map[string]string{"password": "password123"}, http.StatusOK, nil, nil)
+
+	now := time.Now().UTC()
+	mkLog := func(id string, index int, name string, success bool, created time.Time) model.RequestLog {
+		return model.RequestLog{
+			ID: id, CreatedAt: created, Model: "sd-generate", ModelIndex: index,
+			UpstreamModelName: name, Success: success,
+			RawPrompt: "p", FinalPrompt: "p", NegativePrompt: "n",
+			Width: 832, Height: 1216, Steps: 20, CFG: 7, Seed: 1, UpstreamStatus: 200,
+		}
+	}
+	logs := []model.RequestLog{
+		mkLog("u1", 4, "Anima V1", true, now.Add(-5*time.Minute)),
+		mkLog("u2", 4, "Anima V1", true, now.Add(-4*time.Minute)),
+		mkLog("u3", 4, "Anima V1", false, now.Add(-3*time.Minute)),
+		mkLog("u4", 5, "Pixel", false, now.Add(-2*time.Minute)),
+		mkLog("u5", 6, "", true, now.Add(-time.Minute)),
+	}
+	for _, l := range logs {
+		if err := application.store.InsertRequestLog(context.Background(), l); err != nil {
+			t.Fatalf("insert log %s: %v", l.ID, err)
+		}
+	}
+
+	var summary map[string]any
+	requestJSON(t, handler, http.MethodGet, "/admin/api/monitoring/summary", nil, http.StatusOK, &summary, cookies)
+
+	tasks := summary["tasks"].(map[string]any)
+	if tasks["total"].(float64) != 5 {
+		t.Fatalf("task total want 5 got %#v", tasks["total"])
+	}
+
+	usage, ok := summary["model_usage"].([]any)
+	if !ok {
+		t.Fatalf("model_usage missing or wrong type: %#v", summary["model_usage"])
+	}
+	if len(usage) != 3 {
+		t.Fatalf("model_usage buckets want 3 got %d: %#v", len(usage), usage)
+	}
+
+	// Sorted by count desc: Anima V1 (3) is first. The two count-1 buckets
+	// (Pixel, sd6) tie, so verify them by name rather than by position.
+	first := usage[0].(map[string]any)
+	if first["name"].(string) != "Anima V1" || first["count"].(float64) != 3 || first["success"].(float64) != 2 {
+		t.Fatalf("top bucket want Anima V1 count=3 success=2 got %#v", first)
+	}
+	rest := map[string]map[string]any{}
+	for _, e := range usage[1:] {
+		m := e.(map[string]any)
+		rest[m["name"].(string)] = m
+	}
+	if pixel := rest["Pixel"]; pixel == nil || pixel["count"].(float64) != 1 || pixel["success"].(float64) != 0 {
+		t.Fatalf("Pixel bucket want count=1 success=0 got %#v", rest["Pixel"])
+	}
+	if sd6 := rest["sd6"]; sd6 == nil || sd6["count"].(float64) != 1 || sd6["success"].(float64) != 1 {
+		t.Fatalf("sd6 fallback bucket want count=1 success=1 got %#v", rest["sd6"])
+	}
+}
+
 func TestChatCompletionReturnsUpstreamImageURLAndLogsMetadata(t *testing.T) {
 	application, handler := newTestApp(t)
 	var imageURL string
