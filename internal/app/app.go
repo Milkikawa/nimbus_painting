@@ -627,7 +627,13 @@ func (a *App) deletePromptGroup(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 func (a *App) listLogs(w http.ResponseWriter, r *http.Request) {
-	logs, err := a.store.ListRequestLogs(r.Context(), 100)
+	limit := 100
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 100 {
+			limit = n
+		}
+	}
+	logs, err := a.store.ListRequestLogs(r.Context(), limit)
 	if err != nil {
 		openAIError(w, 500, err.Error(), "server_error", "logs_failed")
 		return

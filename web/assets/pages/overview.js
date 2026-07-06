@@ -26,7 +26,7 @@ async function loadOverview(ctx) {
     const [monitoring, settings, logs] = await Promise.all([
       api('/admin/api/monitoring/summary'),
       settingsSummary(),
-      api('/admin/api/logs').then(asList).catch(() => [])
+      api('/admin/api/logs?limit=5').then(asList).catch(() => [])
     ]);
     const root = document.getElementById('overviewRoot');
     if (!root) return;
