@@ -85,10 +85,17 @@ func (s *CatalogStore) FindByIndex(index int) (UpstreamModel, bool) {
 	}
 	return UpstreamModel{}, false
 }
-
 func (s *CatalogStore) IsImageGenerationModel(index int) bool {
-	item, ok := s.FindByIndex(index)
-	return ok && item.Available && item.Type == UpstreamModelTypeImage
+	_, found, available := s.ResolveImageModel(index)
+	return found && available
+}
+
+func (s *CatalogStore) ResolveImageModel(index int) (UpstreamModel, bool, bool) {
+	item, found := s.FindByIndex(index)
+	if !found {
+		return UpstreamModel{}, false, false
+	}
+	return item, true, IsAvailableImageModel(item)
 }
 
 func (s *CatalogStore) MaxIndex() int {
@@ -179,16 +186,29 @@ func NormalizeUpstreamModels(models []UpstreamModel) ([]UpstreamModel, error) {
 
 func FirstAvailableImageModelFrom(models []UpstreamModel, fallback int) (int, bool) {
 	for _, item := range models {
-		if item.Index == fallback && item.Available && item.Type == UpstreamModelTypeImage {
+		if item.Index == fallback && IsAvailableImageModel(item) {
 			return fallback, true
 		}
 	}
 	for _, item := range models {
-		if item.Available && item.Type == UpstreamModelTypeImage {
+		if IsAvailableImageModel(item) {
 			return item.Index, true
 		}
 	}
 	return 0, false
+}
+
+func IsAvailableImageModel(item UpstreamModel) bool {
+	return item.Available && item.Type == UpstreamModelTypeImage
+}
+
+func IsAvailableImageModelInList(models []UpstreamModel, index int) bool {
+	for _, item := range models {
+		if item.Index == index {
+			return IsAvailableImageModel(item)
+		}
+	}
+	return false
 }
 
 func validateAndDefaultModels(models []UpstreamModel) error {
@@ -225,7 +245,7 @@ func validateAndDefaultModels(models []UpstreamModel) error {
 		if item.Rules.ForceSteps != nil && *item.Rules.ForceSteps <= 0 {
 			return fmt.Errorf("model %d rules.force_steps must be > 0", item.Index)
 		}
-		if item.Available && item.Type == UpstreamModelTypeImage {
+		if IsAvailableImageModel(*item) {
 			hasAvailableImageModel = true
 		}
 	}
