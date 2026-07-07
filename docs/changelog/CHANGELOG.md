@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.0 - 图片返回 URL 本地化
+
+### 行为变更
+
+- 默认图片返回模式改为 `local_url`：上游生成成功后，Nimbus Painting 会下载图片到本地归档，并向下游返回 `PUBLIC_BASE_URL + /images/...` 形式的本地绝对 URL。
+- 新增兼容模式 `IMAGE_RETURN_MODE=upstream_url`：下游响应继续使用上游原始 `image_url`，但本地归档仍会尽力执行。
+- `PUBLIC_BASE_URL` 现在为启动必填配置，必须是下游可访问的 `http(s)` 绝对地址，可带 path，不允许 query string 或 fragment。
+- 默认 `local_url` 模式下，如上游生成成功但本地下载/保存图片重试后仍失败，接口仍返回 HTTP 200，但图片 URL 为空，请求日志记录 `Success=false` 与 `ImageSaveError`。
+
+### 已加入
+
+- 新增环境变量 `IMAGE_RETURN_MODE`，可选值为 `local_url` / `upstream_url`，默认 `local_url`。
+- 新增后台设置 `image_download_timeout_seconds`，默认 180 秒，用于控制从上游 `image_url` 下载并保存本地图片的总等待时间。
+- 图片下载增加最多 3 次 GET 重试，并使用 500ms、1s 的上下文感知退避；不重试上游绘图请求，避免重复扣点。
+
 ## 0.5.5 - 概览页日志按需拉取
 
 ### 改进

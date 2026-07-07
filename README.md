@@ -28,9 +28,9 @@ Nimbus Painting
 2. **解析参数** — 从提示词中识别模型编号、尺寸、seed、steps、cfg 等控制参数，识别完成后将其从提示词中移除，避免控制参数污染最终发送给上游的 prompt。
 3. **拼接提示词** — 若管理后台配置了默认正面 / 负面提示词组，正面词追加至用户提示词末尾，负面词作为独立的 `negative_prompt` 传递给上游。
 4. **调用上游** — 整理后的参数发送至上游绘图接口，请求头中的 `Authorization` 字段原样透传。项目不保存、不展示、不记录 API Key。
-5. **返回结果** — 上游返回图片地址后，包装为 OpenAI 风格回复返回给下游。
-6. **本地归档** — 生成成功后，项目将图片下载至本地归档，供管理后台图片管理页面查看。
-7. **记录日志** — 请求的关键信息写入数据库，包括原始输入、最终 prompt、发送给上游的完整参数、上游响应状态、图片地址、点数消耗等。
+5. **本地归档** — 上游返回 `image_url` 后，项目在本机下载图片并保存到图片目录。
+6. **返回结果** — 默认将本地归档地址拼接为 `PUBLIC_BASE_URL + /images/...` 的绝对 URL，再包装为 OpenAI 风格回复返回给下游；也可通过 `IMAGE_RETURN_MODE=upstream_url` 切回上游原图链接。
+7. **记录日志** — 请求的关键信息写入数据库，包括原始输入、最终 prompt、发送给上游的完整参数、上游响应状态、上游/下游图片地址、点数消耗等。
 
 对外暴露两个抽象模型：一个用于文生图，一个预留给图片编辑。用户在提示词中通过 `sd` 加数字选择上游内部模型编号，省略时使用默认编号。可选范围、可用状态和特殊兼容规则可在管理后台「模型目录」中维护；默认编号和生成参数在「基础设置」中配置。
 
@@ -42,7 +42,7 @@ Nimbus Painting
 - 自动解析尺寸、seed、steps、cfg 等参数，并从最终 prompt 中移除控制参数
 - 支持在管理后台配置默认正面 / 负面提示词组，正面词后插、负面词单独传递
 - API Key 仅从请求头透传至上游，不保存、不展示、不写入日志
-- 生成成功后自动下载图片至本地归档
+- 生成成功后自动下载图片至本地归档，并默认向下游返回本地可访问的绝对图片 URL
 - 提供管理后台，支持配置上游、默认参数、模型目录、提示词组，查看请求日志与图片
 - 管理后台包含概览、项目监测、基础设置、模型目录、提示词组、图片管理、请求日志等多个视图
 - 支持 SQLite 与 MariaDB
@@ -75,7 +75,7 @@ docker network create 1panel-network
 cp .env.example .env
 ```
 
-默认端口为 `4030`，通常无需修改 `.env`。
+默认端口为 `4030`，通常无需修改监听端口。启动前必须在 `.env` 中配置 `PUBLIC_BASE_URL`，它需要是 NewAPI、Koishi、NapCat 等下游能访问到的 `http(s)` 绝对地址，例如 `http://192.168.1.10:4030` 或带路径的 `https://example.com/nimbus`。若希望临时恢复旧版透传上游原图链接的行为，可设置 `IMAGE_RETURN_MODE=upstream_url`。
 
 #### 2. 启动服务
 
@@ -146,8 +146,10 @@ go mod tidy
 
 #### 3. 启动服务
 
+源码运行同样需要配置 `PUBLIC_BASE_URL`，且必须是下游可访问的 `http(s)` 绝对地址：
+
 ```bash
-go run ./cmd/server
+PUBLIC_BASE_URL=http://127.0.0.1:4030 IMAGE_RETURN_MODE=local_url go run ./cmd/server
 ```
 
 默认访问地址：
@@ -162,18 +164,21 @@ http://localhost:4030/dashboard
 
 ## 环境变量
 
-| 变量                      | Docker 默认值                      | 源码默认值                    | 说明                                                            |
-| ------------------------- | ---------------------------------- | ----------------------------- | --------------------------------------------------------------- |
-| `LISTEN_ADDR`             | `:4030`                            | `:4030`                       | 服务监听地址                                                    |
-| `DB_DRIVER`               | `sqlite`                           | `sqlite`                      | 数据库类型：`sqlite` 或 `mariadb`                               |
-| `SQLITE_PATH`             | `/app/config/app.db`               | `config/app.db`               | SQLite 数据库路径                                               |
-| `MARIADB_DSN`             | 空                                 | 空                            | MariaDB 连接字符串                                              |
-| `UPSTREAM_ENDPOINT`       | 空                                 | 空                            | 上游完整生图 endpoint，可留空后于后台配置                       |
-| `IMAGE_DIR`               | `/app/images`                      | `images`                      | 图片保存目录                                                    |
-| `MODEL_CATALOG_PATH`      | `/app/config/upstream_models.json` | `config/upstream_models.json` | 上游模型能力目录文件；Docker 中随 `/app/config` 挂载持久化      |
-| `PUBLIC_BASE_URL`         | 空                                 | 空                            | 本地归档图片 URL 的外部访问前缀；不影响返回给下游的上游原图链接 |
-| `SESSION_TTL_HOURS`       | `24`                               | `24`                          | 后台登录有效期                                                  |
-| `DEFAULT_TIMEOUT_SECONDS` | `120`                              | `120`                         | 默认上游请求超时                                                |
+| 变量                      | Docker 默认值                      | 源码默认值                    | 说明                                                                            |
+| ------------------------- | ---------------------------------- | ----------------------------- | ------------------------------------------------------------------------------- |
+| `LISTEN_ADDR`             | `:4030`                            | `:4030`                       | 服务监听地址                                                                    |
+| `DB_DRIVER`               | `sqlite`                           | `sqlite`                      | 数据库类型：`sqlite` 或 `mariadb`                                               |
+| `SQLITE_PATH`             | `/app/config/app.db`               | `config/app.db`               | SQLite 数据库路径                                                               |
+| `MARIADB_DSN`             | 空                                 | 空                            | MariaDB 连接字符串                                                              |
+| `UPSTREAM_ENDPOINT`       | 空                                 | 空                            | 上游完整生图 endpoint，可留空后于后台配置                                       |
+| `IMAGE_DIR`               | `/app/images`                      | `images`                      | 图片保存目录                                                                    |
+| `MODEL_CATALOG_PATH`      | `/app/config/upstream_models.json` | `config/upstream_models.json` | 上游模型能力目录文件；Docker 中随 `/app/config` 挂载持久化                      |
+| `PUBLIC_BASE_URL`         | 空（启动必填）                     | 空（启动必填）                | 默认本地图片 URL 的外部访问前缀；需为下游可访问的 http(s) 绝对地址              |
+| `IMAGE_RETURN_MODE`       | `local_url`                        | `local_url`                   | 图片返回模式：`local_url` 默认返回本地归档 URL；`upstream_url` 返回上游原图 URL |
+| `SESSION_TTL_HOURS`       | `24`                               | `24`                          | 后台登录有效期                                                                  |
+| `DEFAULT_TIMEOUT_SECONDS` | `120`                              | `120`                         | 默认上游请求超时                                                                |
+
+`PUBLIC_BASE_URL` 允许包含 path，例如 `https://example.com/nimbus` 会生成 `https://example.com/nimbus/images/...`；不允许包含 query string 或 fragment。未配置或格式不合法时，服务会在启动期失败并输出明确错误。`IMAGE_RETURN_MODE=upstream_url` 仅改变下游响应中的图片 URL，本地归档仍会尽力执行。
 
 MariaDB DSN 示例：
 
@@ -262,17 +267,19 @@ WebUI「模型目录」页面的读写对象就是 `MODEL_CATALOG_PATH` 指向�
 
 ## 返回格式
 
-当前返回给下游的为 Markdown 图片格式，图片地址默认使用上游返回的原始链接：
+返回给下游的内容仍为 Markdown 图片格式。默认 `IMAGE_RETURN_MODE=local_url` 时，项目会先把上游 `image_url` 下载到本地图片目录，再使用 `PUBLIC_BASE_URL + /images/YYYY-MM-DD/filename.ext` 生成下游可访问的绝对 URL：
 
 ```text
-![generated image](上游图片URL)
+![generated image](http://192.168.1.10:4030/images/2026-07-07/2026-07-07_14-30_sd4_seed8848_ab12cd.jpg)
 
-Image URL: 上游图片URL
+Image URL: http://192.168.1.10:4030/images/2026-07-07/2026-07-07_14-30_sd4_seed8848_ab12cd.jpg
 Seed: 8848
 Model: sd4
 ```
 
-生成成功后，项目仍会将图片下载至本地归档，供后台图片管理页面查看。本地归档地址不会覆盖返回给下游的图片地址，以避免 NewAPI、Koishi、NapCat、QQ 客户端等外部用户收到 `/images/...` 这类仅能在本项目内部访问的相对路径。
+如果需要兼容旧链路，可设置 `IMAGE_RETURN_MODE=upstream_url`。此模式下响应继续使用上游原始 `image_url`，但 Nimbus Painting 仍会尽力下载并本地归档，归档失败不会影响下游响应。
+
+在默认 `local_url` 模式下，如果上游生成成功但本地图片下载/保存重试后仍失败，接口仍返回 HTTP 200，Markdown 中图片 URL 与 `Image URL` 为空；请求日志会记录 `Success=false` 和 `ImageSaveError`，`ErrorMessage` 保持为空，用于区分“上游生成失败”和“本地归档失败”。
 
 ---
 
@@ -297,7 +304,7 @@ images/YYYY-MM-DD/YYYY-MM-DD_HH-mm_sd4_seed8848_ab12cd.jpg
 
 文件名包含：生成日期、生成时间（精确到分钟）、模型编号、seed、随机字符（规避并发冲突）。
 
-后台会同时记录上游原图链接、本地归档链接、上游图片 ID、上游模型名称及实际返回给下游的图片链接。`PUBLIC_BASE_URL` 仅用于将本地归档链接从 `/images/...` 拼接为外部绝对地址；若无可公开访问的项目地址，保持为空即可。
+后台会同时记录上游原图链接、本地归档链接、上游图片 ID、上游模型名称及实际返回给下游的图片链接。`PUBLIC_BASE_URL` 是启动必填项，必须能被下游访问；它会与 `/images/...` 拼接成默认返回给下游的绝对地址。`PUBLIC_BASE_URL` 可带 path，例如 `https://example.com/nimbus` 会生成 `https://example.com/nimbus/images/...`。若设置 `IMAGE_RETURN_MODE=upstream_url`，下游响应使用上游原图链接，但本地归档与日志记录仍会执行。
 
 ---
 
@@ -327,7 +334,7 @@ http://localhost:4030/dashboard
 
 - **概览** — 核心指标卡片、运行状态摘要、模型使用统计、最近活动
 - **项目监测** — 进程资源占用（内存、协程、GC）、图片统计、任务统计与成功率
-- **基础设置** — 上游接口、默认模型、默认尺寸、steps、cfg、尺寸边界、请求超时、图片保存目录、默认提示词组选择
+- **基础设置** — 上游接口、默认模型、默认尺寸、steps、cfg、尺寸边界、请求超时、图片保存目录、图片下载超时、默认提示词组选择
 - **模型目录** — 新增 / 编辑 / 删除本地上游模型能力配置，维护可用状态和特殊参数规则
 - **提示词组** — 新增 / 编辑 / 删除正面与负面提示词组
 - **图片管理** — 查看与删除已保存的生成图片
