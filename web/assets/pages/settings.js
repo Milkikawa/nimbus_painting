@@ -10,6 +10,7 @@ const settingIds = [
   "min_dimension",
   "max_dimension",
   "request_timeout_seconds",
+  "image_download_timeout_seconds",
   "image_save_dir",
   "selected_positive_group_id",
   "selected_negative_group_id",
@@ -125,6 +126,15 @@ export const settingsPage = {
           </div>
           <div class="settings-row-input">
             <input id="image_save_dir" placeholder="images">
+          </div>
+        </div>
+        <div class="settings-row">
+          <div class="settings-row-label">
+            <div class="label-main">图片下载超时秒数</div>
+            <div class="label-desc">从上游 image_url 下载并保存到本地的总等待时间，含重试</div>
+          </div>
+          <div class="settings-row-input">
+            <input id="image_download_timeout_seconds" inputmode="numeric" placeholder="180">
           </div>
         </div>
         <div class="settings-row">
