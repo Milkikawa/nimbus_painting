@@ -24,6 +24,8 @@ func newTestApp(t *testing.T) (*App, http.Handler) {
 		DBDriver:         "sqlite",
 		SQLitePath:       filepath.Join(tempDir, "app.db"),
 		ImageDir:         filepath.Join(tempDir, "images"),
+		PublicBaseURL:    "http://nimbus.test",
+		ImageReturnMode:  config.ImageReturnModeLocalURL,
 		ModelCatalogPath: filepath.Join(tempDir, "models.json"),
 		SessionTTL:       time.Hour,
 		DefaultTimeout:   time.Minute,
@@ -182,7 +184,7 @@ func TestMonitoringSummaryModelUsage(t *testing.T) {
 	}
 }
 
-func TestChatCompletionReturnsUpstreamImageURLAndLogsMetadata(t *testing.T) {
+func TestChatCompletionReturnsLocalImageURLByDefaultAndLogsMetadata(t *testing.T) {
 	application, handler := newTestApp(t)
 	var imageURL string
 	var sawZImageRequest bool
@@ -256,11 +258,11 @@ func TestChatCompletionReturnsUpstreamImageURLAndLogsMetadata(t *testing.T) {
 	choices := response["choices"].([]any)
 	message := choices[0].(map[string]any)["message"].(map[string]any)
 	content := message["content"].(string)
-	if !strings.Contains(content, imageURL) {
-		t.Fatalf("response should contain upstream image url: %s", content)
+	if !strings.Contains(content, "http://nimbus.test/images/") {
+		t.Fatalf("response should contain local image url: %s", content)
 	}
-	if strings.Contains(content, "/images/") {
-		t.Fatalf("response should not expose local image url: %s", content)
+	if strings.Contains(content, imageURL) {
+		t.Fatalf("response should not expose upstream image url by default: %s", content)
 	}
 
 	logs, err := application.store.ListRequestLogs(context.Background(), 1)
@@ -271,10 +273,10 @@ func TestChatCompletionReturnsUpstreamImageURLAndLogsMetadata(t *testing.T) {
 		t.Fatalf("unexpected logs count: %d", len(logs))
 	}
 	log := logs[0]
-	if log.DownstreamImageURL != imageURL || log.UpstreamImageURL != imageURL || log.UpstreamImageID != "up-img-1" || log.UpstreamModelName != "上游模型名" {
+	if !log.Success || !strings.HasPrefix(log.DownstreamImageURL, "http://nimbus.test/images/") || log.UpstreamImageURL != imageURL || log.UpstreamImageID != "up-img-1" || log.UpstreamModelName != "上游模型名" {
 		t.Fatalf("unexpected logged metadata: %#v", log)
 	}
-	if log.ImageRecordID == "" || log.ImageReturnMode != "upstream_url" || !strings.Contains(log.UpstreamResponseBody, "图像生成成功") {
+	if log.ImageRecordID == "" || log.ImageReturnMode != config.ImageReturnModeLocalURL || !strings.Contains(log.UpstreamResponseBody, "图像生成成功") {
 		t.Fatalf("missing log detail fields: %#v", log)
 	}
 
@@ -284,6 +286,97 @@ func TestChatCompletionReturnsUpstreamImageURLAndLogsMetadata(t *testing.T) {
 	}, http.StatusOK, &response, nil, map[string]string{"Authorization": "Bearer test-key"})
 	if !sawZImageRequest {
 		t.Fatalf("expected sd15 request to exercise catalog rules")
+	}
+}
+
+func TestChatCompletionReturnsUpstreamImageURLWhenConfigured(t *testing.T) {
+	application, handler := newTestApp(t)
+	application.cfg.ImageReturnMode = config.ImageReturnModeUpstreamURL
+
+	var imageURL string
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/image.png" {
+			w.Header().Set("Content-Type", "image/png")
+			_, _ = w.Write([]byte("png"))
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]any{"image_url": imageURL, "image_id": "up-img-upstream", "model_name": "upstream mode model"}})
+	}))
+	defer upstreamServer.Close()
+	imageURL = upstreamServer.URL + "/image.png"
+	if err := application.store.SetSetting(context.Background(), "upstream_endpoint", upstreamServer.URL); err != nil {
+		t.Fatalf("set upstream endpoint: %v", err)
+	}
+
+	var response map[string]any
+	requestJSON(t, handler, http.MethodPost, "/v1/chat/completions", map[string]any{
+		"model":    "sd-generate",
+		"messages": []map[string]any{{"role": "user", "content": "sd4 prompt"}},
+	}, http.StatusOK, &response, nil, map[string]string{"Authorization": "Bearer test-key"})
+	choices := response["choices"].([]any)
+	message := choices[0].(map[string]any)["message"].(map[string]any)
+	content := message["content"].(string)
+	if !strings.Contains(content, imageURL) {
+		t.Fatalf("response should contain upstream image url: %s", content)
+	}
+	if strings.Contains(content, "http://nimbus.test/images/") {
+		t.Fatalf("response should not use local image url in upstream mode: %s", content)
+	}
+
+	logs, err := application.store.ListRequestLogs(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("list request logs: %v", err)
+	}
+	log := logs[0]
+	if !log.Success || log.DownstreamImageURL != imageURL || log.UpstreamImageURL != imageURL || log.ImageReturnMode != config.ImageReturnModeUpstreamURL || log.ImageRecordID == "" {
+		t.Fatalf("unexpected upstream mode log: %#v", log)
+	}
+}
+
+func TestLocalImageReturnDownloadFailureReturnsOKWithEmptyURLAndFailedLog(t *testing.T) {
+	application, handler := newTestApp(t)
+	var imageURL string
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/generate":
+			writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]any{"image_url": imageURL, "image_id": "up-img-missing", "model_name": "missing image model"}})
+		case "/missing.png":
+			http.NotFound(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstreamServer.Close()
+	imageURL = upstreamServer.URL + "/missing.png"
+	if err := application.store.SetSetting(context.Background(), "upstream_endpoint", upstreamServer.URL+"/generate"); err != nil {
+		t.Fatalf("set upstream endpoint: %v", err)
+	}
+
+	var response map[string]any
+	requestJSON(t, handler, http.MethodPost, "/v1/chat/completions", map[string]any{
+		"model":    "sd-generate",
+		"messages": []map[string]any{{"role": "user", "content": "sd4 prompt"}},
+	}, http.StatusOK, &response, nil, map[string]string{"Authorization": "Bearer test-key"})
+	choices := response["choices"].([]any)
+	message := choices[0].(map[string]any)["message"].(map[string]any)
+	content := message["content"].(string)
+	if strings.Contains(content, imageURL) {
+		t.Fatalf("local failure response should not expose upstream url: %s", content)
+	}
+	if !strings.Contains(content, "![generated image]()") || !strings.Contains(content, "Image URL: \n") {
+		t.Fatalf("local failure response should contain empty image URL: %s", content)
+	}
+
+	logs, err := application.store.ListRequestLogs(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("list request logs: %v", err)
+	}
+	log := logs[0]
+	if log.Success || log.ImageReturnMode != config.ImageReturnModeLocalURL || log.UpstreamImageURL != imageURL || log.DownstreamImageURL != "" || log.ImageSaveError == "" || log.ErrorMessage != "" || log.ImageRecordID != "" {
+		t.Fatalf("unexpected failed local log: %#v", log)
+	}
+	if !strings.Contains(log.ImageSaveError, "failed after 3 attempts") {
+		t.Fatalf("save error should include attempts: %q", log.ImageSaveError)
 	}
 }
 

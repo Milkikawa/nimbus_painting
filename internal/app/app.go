@@ -156,7 +156,11 @@ func (a *App) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	if upstreamModel.Rules != nil && !upstreamModel.Rules.AppendDefaultPositivePrompt {
 		finalPrompt = parser.AppendPositive(parsed.Prompt, "")
 	}
-	reqLog := model.RequestLog{ID: store.NewID("req"), CreatedAt: time.Now(), Model: req.Model, ModelIndex: parsed.ModelIndex, RawPrompt: content, FinalPrompt: finalPrompt, NegativePrompt: negative, Width: parsed.Width, Height: parsed.Height, Steps: parsed.Steps, CFG: parsed.CFG, Seed: parsed.Seed, UpstreamEndpoint: settings.UpstreamEndpoint, ImageReturnMode: "upstream_url"}
+	imageReturnMode := a.cfg.ImageReturnMode
+	if imageReturnMode == "" {
+		imageReturnMode = config.ImageReturnModeLocalURL
+	}
+	reqLog := model.RequestLog{ID: store.NewID("req"), CreatedAt: time.Now(), Model: req.Model, ModelIndex: parsed.ModelIndex, RawPrompt: content, FinalPrompt: finalPrompt, NegativePrompt: negative, Width: parsed.Width, Height: parsed.Height, Steps: parsed.Steps, CFG: parsed.CFG, Seed: parsed.Seed, UpstreamEndpoint: settings.UpstreamEndpoint, ImageReturnMode: imageReturnMode}
 	a.activeRequests.Add(1)
 	defer a.activeRequests.Add(-1)
 
@@ -182,8 +186,10 @@ func (a *App) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	reqLog.UpstreamModelName = upResult.Parsed.Data.ModelName
 	reqLog.PointsUsed = upResult.Parsed.Data.PointsUsed
 	reqLog.RemainingPoints = upResult.Parsed.Data.RemainingPoints
-	reqLog.DownstreamImageURL = imageURL
-	saved, saveErr := imageio.Save(context.Background(), a.effectiveImageDir(settings), a.cfg.PublicBaseURL, imageURL, reqLog)
+
+	saveCtx, saveCancel := context.WithTimeout(context.Background(), time.Duration(settings.ImageDownloadTimeout)*time.Second)
+	defer saveCancel()
+	saved, saveErr := imageio.Save(saveCtx, a.effectiveImageDir(settings), a.cfg.PublicBaseURL, imageURL, reqLog)
 	if saveErr != nil {
 		reqLog.ImageSaveError = saveErr.Error()
 		log.Printf("image_save_failed request_id=%s error=%v", reqLog.ID, saveErr)
@@ -193,14 +199,28 @@ func (a *App) chatCompletions(w http.ResponseWriter, r *http.Request) {
 		reqLog.ImageRecordID = saved.ID
 		_ = a.store.InsertImageRecord(context.Background(), saved)
 	}
-	reqLog.Success = true
+
+	downstreamImageURL := ""
+	switch imageReturnMode {
+	case config.ImageReturnModeUpstreamURL:
+		downstreamImageURL = imageURL
+		reqLog.Success = true
+	case config.ImageReturnModeLocalURL:
+		if saveErr == nil {
+			downstreamImageURL = saved.PublicURL
+			reqLog.Success = true
+		} else {
+			reqLog.Success = false
+		}
+	}
+	reqLog.DownstreamImageURL = downstreamImageURL
 	_ = a.store.InsertRequestLog(context.Background(), reqLog)
 
 	if req.Stream {
-		a.writeStream(w, req.Model, imageURL, reqLog)
+		a.writeStream(w, req.Model, downstreamImageURL, reqLog)
 		return
 	}
-	writeJSON(w, http.StatusOK, chatCompletion(req.Model, imageURL, reqLog))
+	writeJSON(w, http.StatusOK, chatCompletion(req.Model, downstreamImageURL, reqLog))
 }
 
 func extractPrompt(messages []chatMessage) (string, error) {
@@ -245,9 +265,29 @@ func (a *App) loadSettings(ctx context.Context) (model.Settings, error) {
 			defaultModel = fallback
 		}
 	}
-	settings := model.Settings{UpstreamEndpoint: items["upstream_endpoint"], DefaultModel: defaultModel, DefaultWidth: atoi(items["default_width"], 832), DefaultHeight: atoi(items["default_height"], 1216), DefaultSteps: atoi(items["default_steps"], 20), DefaultCFG: atof(items["default_cfg"], 7), MinDimension: atoi(items["min_dimension"], 64), MaxDimension: atoi(items["max_dimension"], 2048), RequestTimeout: atoi(items["request_timeout_seconds"], 120), PositiveGroupID: items["selected_positive_group_id"], NegativeGroupID: items["selected_negative_group_id"], ImageSaveDir: items["image_save_dir"]}
+	settings := model.Settings{
+		UpstreamEndpoint:     items["upstream_endpoint"],
+		DefaultModel:         defaultModel,
+		DefaultWidth:         atoi(items["default_width"], 832),
+		DefaultHeight:        atoi(items["default_height"], 1216),
+		DefaultSteps:         atoi(items["default_steps"], 20),
+		DefaultCFG:           atof(items["default_cfg"], 7),
+		MinDimension:         atoi(items["min_dimension"], 64),
+		MaxDimension:         atoi(items["max_dimension"], 2048),
+		RequestTimeout:       atoi(items["request_timeout_seconds"], 120),
+		ImageDownloadTimeout: atoi(items["image_download_timeout_seconds"], 180),
+		PositiveGroupID:      items["selected_positive_group_id"],
+		NegativeGroupID:      items["selected_negative_group_id"],
+		ImageSaveDir:         items["image_save_dir"],
+	}
 	if settings.RequestTimeout < 1 {
 		settings.RequestTimeout = 120
+	}
+	if settings.ImageDownloadTimeout < 1 {
+		settings.ImageDownloadTimeout = 180
+	}
+	if settings.ImageDownloadTimeout > 86400 {
+		settings.ImageDownloadTimeout = 86400
 	}
 	return settings, nil
 }
@@ -547,7 +587,7 @@ func (a *App) validateSettingsUpdate(ctx context.Context, items map[string]strin
 			continue
 		case "upstream_endpoint", "selected_positive_group_id", "selected_negative_group_id", "image_save_dir":
 			merged[k] = v
-		case "default_model_index", "default_width", "default_height", "default_steps", "min_dimension", "max_dimension", "request_timeout_seconds":
+		case "default_model_index", "default_width", "default_height", "default_steps", "min_dimension", "max_dimension", "request_timeout_seconds", "image_download_timeout_seconds":
 			if _, err := strconv.Atoi(v); err != nil {
 				return fmt.Errorf("%s must be an integer", k)
 			}
@@ -570,6 +610,7 @@ func (a *App) validateSettingsUpdate(ctx context.Context, items map[string]strin
 	defaultSteps := atoi(merged["default_steps"], 20)
 	defaultCFG := atof(merged["default_cfg"], 7)
 	requestTimeout := atoi(merged["request_timeout_seconds"], 120)
+	imageDownloadTimeout := atoi(merged["image_download_timeout_seconds"], 180)
 
 	if !a.catalog.IsImageGenerationModel(defaultModel) {
 		return fmt.Errorf("default_model_index must be an available image model index between 0 and %d", a.catalog.MaxIndex())
@@ -592,8 +633,12 @@ func (a *App) validateSettingsUpdate(ctx context.Context, items map[string]strin
 	if requestTimeout < 1 || requestTimeout > 600 {
 		return fmt.Errorf("request_timeout_seconds must be between 1 and 600")
 	}
+	if imageDownloadTimeout < 1 || imageDownloadTimeout > 86400 {
+		return fmt.Errorf("image_download_timeout_seconds must be between 1 and 86400")
+	}
 	return nil
 }
+
 func (a *App) listPromptGroups(w http.ResponseWriter, r *http.Request) {
 	groups, err := a.store.ListPromptGroups(r.Context())
 	if err != nil {

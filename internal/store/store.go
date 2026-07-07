@@ -188,15 +188,16 @@ func (s *Store) columnExists(ctx context.Context, table, column string) (bool, e
 
 func (s *Store) seedDefaults(ctx context.Context, cfg config.Config) error {
 	defaults := map[string]string{
-		"default_model_index":     fmt.Sprint(model.DefaultUpstreamModelIndex),
-		"default_width":           "832",
-		"default_height":          "1216",
-		"default_steps":           "20",
-		"default_cfg":             "7",
-		"min_dimension":           "64",
-		"max_dimension":           "2048",
-		"request_timeout_seconds": "120",
-		"image_save_dir":          cfg.ImageDir,
+		"default_model_index":            fmt.Sprint(model.DefaultUpstreamModelIndex),
+		"default_width":                  "832",
+		"default_height":                 "1216",
+		"default_steps":                  "20",
+		"default_cfg":                    "7",
+		"min_dimension":                  "64",
+		"max_dimension":                  "2048",
+		"request_timeout_seconds":        "120",
+		"image_download_timeout_seconds": "180",
+		"image_save_dir":                 cfg.ImageDir,
 	}
 	if cfg.UpstreamEndpoint != "" {
 		defaults["upstream_endpoint"] = cfg.UpstreamEndpoint

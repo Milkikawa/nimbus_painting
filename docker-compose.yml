@@ -14,6 +14,7 @@ services:
       IMAGE_DIR: "${IMAGE_DIR:-/app/images}"
       MODEL_CATALOG_PATH: "${MODEL_CATALOG_PATH:-/app/config/upstream_models.json}"
       PUBLIC_BASE_URL: "${PUBLIC_BASE_URL:-}"
+      IMAGE_RETURN_MODE: "${IMAGE_RETURN_MODE:-local_url}"
     volumes:
       - ./config:/app/config
       - ./images:/app/images
