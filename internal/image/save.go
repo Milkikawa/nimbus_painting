@@ -2,6 +2,7 @@ package image
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,8 +15,47 @@ import (
 	"nimbus-painting/internal/store"
 )
 
+const maxImageDownloadAttempts = 3
+
+var errImageTooLarge = errors.New("downloaded image exceeds 64 MiB limit")
+
 func Save(ctx context.Context, baseDir, publicBaseURL, imageURL string, parsed model.RequestLog) (model.ImageRecord, error) {
-	client := &http.Client{Timeout: 60 * time.Second}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	var lastErr error
+	attempts := 0
+	for attempt := 1; attempt <= maxImageDownloadAttempts; attempt++ {
+		attempts = attempt
+		saved, err := saveOnce(ctx, baseDir, publicBaseURL, imageURL, parsed)
+		if err == nil {
+			return saved, nil
+		}
+		lastErr = err
+		if errors.Is(err, errImageTooLarge) {
+			break
+		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			lastErr = ctxErr
+			break
+		}
+		if attempt == maxImageDownloadAttempts {
+			break
+		}
+		if err := sleepWithContext(ctx, imageDownloadBackoff(attempt)); err != nil {
+			lastErr = err
+			break
+		}
+	}
+	if lastErr == nil {
+		lastErr = context.Canceled
+	}
+	return model.ImageRecord{}, fmt.Errorf("download image failed after %d attempts: %w", attempts, lastErr)
+}
+
+func saveOnce(ctx context.Context, baseDir, publicBaseURL, imageURL string, parsed model.RequestLog) (model.ImageRecord, error) {
+	client := &http.Client{}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
 	if err != nil {
 		return model.ImageRecord{}, err
@@ -45,12 +85,14 @@ func Save(ctx context.Context, baseDir, publicBaseURL, imageURL string, parsed m
 	limited := io.LimitReader(resp.Body, (64<<20)+1)
 	written, err := io.Copy(out, limited)
 	if err != nil {
+		_ = out.Close()
+		_ = os.Remove(localPath)
 		return model.ImageRecord{}, err
 	}
 	if written > 64<<20 {
 		_ = out.Close()
 		_ = os.Remove(localPath)
-		return model.ImageRecord{}, fmt.Errorf("downloaded image exceeds 64 MiB limit")
+		return model.ImageRecord{}, errImageTooLarge
 	}
 
 	relativeURL := "/images/" + day + "/" + filename
@@ -65,6 +107,24 @@ func Save(ctx context.Context, baseDir, publicBaseURL, imageURL string, parsed m
 		ModelIndex: parsed.ModelIndex, Seed: parsed.Seed, Width: parsed.Width, Height: parsed.Height,
 		Prompt: parsed.FinalPrompt, NegativePrompt: parsed.NegativePrompt,
 	}, nil
+}
+
+func imageDownloadBackoff(attempt int) time.Duration {
+	if attempt <= 1 {
+		return 500 * time.Millisecond
+	}
+	return time.Second
+}
+
+func sleepWithContext(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func extFromContentType(contentType string) string {

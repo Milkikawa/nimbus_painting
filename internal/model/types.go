@@ -3,18 +3,19 @@ package model
 import "time"
 
 type Settings struct {
-	UpstreamEndpoint string
-	DefaultModel     int
-	DefaultWidth     int
-	DefaultHeight    int
-	DefaultSteps     int
-	DefaultCFG       float64
-	MinDimension     int
-	MaxDimension     int
-	RequestTimeout   int
-	PositiveGroupID  string
-	NegativeGroupID  string
-	ImageSaveDir     string
+	UpstreamEndpoint     string
+	DefaultModel         int
+	DefaultWidth         int
+	DefaultHeight        int
+	DefaultSteps         int
+	DefaultCFG           float64
+	MinDimension         int
+	MaxDimension         int
+	RequestTimeout       int
+	ImageDownloadTimeout int
+	PositiveGroupID      string
+	NegativeGroupID      string
+	ImageSaveDir         string
 }
 
 type PromptGroup struct {
