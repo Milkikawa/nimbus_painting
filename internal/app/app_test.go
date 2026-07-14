@@ -71,6 +71,80 @@ func TestAdminStatusLifecycle(t *testing.T) {
 	}
 }
 
+func TestAdminLogsAPIReturnsLocalImageURLProjection(t *testing.T) {
+	application, handler := newTestApp(t)
+	requestJSON(t, handler, http.MethodPost, "/admin/init", map[string]string{"password": "password123"}, http.StatusOK, nil, nil)
+	cookies := requestJSON(t, handler, http.MethodPost, "/admin/login", map[string]string{"password": "password123"}, http.StatusOK, nil, nil)
+
+	now := time.Now().UTC()
+	insertImage(t, application, "img_log_active", now.Add(-2*time.Minute))
+	if err := application.store.InsertRequestLog(context.Background(), model.RequestLog{
+		ID: "log_with_image", CreatedAt: now.Add(-time.Minute), Model: "sd-generate", ModelIndex: 4,
+		RawPrompt: "raw", FinalPrompt: "final", Width: 832, Height: 1216, Steps: 20, CFG: 7, Seed: 1,
+		Success: true, ImageRecordID: "img_log_active",
+	}); err != nil {
+		t.Fatalf("insert linked request log: %v", err)
+	}
+	insertLog(t, application, "log_without_image", true, now.Add(-2*time.Minute))
+	if err := application.store.InsertRequestLog(context.Background(), model.RequestLog{
+		ID: "log_with_missing_image", CreatedAt: now.Add(-3 * time.Minute), Model: "sd-generate", ModelIndex: 4,
+		RawPrompt: "raw", FinalPrompt: "final", Width: 832, Height: 1216, Steps: 20, CFG: 7, Seed: 1,
+		Success: true, ImageRecordID: "missing_image_record",
+	}); err != nil {
+		t.Fatalf("insert request log with missing image record: %v", err)
+	}
+
+	fetchLogs := func() []map[string]any {
+		t.Helper()
+		var logs []map[string]any
+		requestJSON(t, handler, http.MethodGet, "/admin/api/logs", nil, http.StatusOK, &logs, cookies)
+		return logs
+	}
+	findLog := func(logs []map[string]any, id string) map[string]any {
+		t.Helper()
+		for _, log := range logs {
+			if log["id"] == id {
+				return log
+			}
+		}
+		t.Fatalf("log %q not found in API response: %#v", id, logs)
+		return nil
+	}
+	assertLocalImageURL := func(log map[string]any, want string) {
+		t.Helper()
+		value, exists := log["local_image_url"]
+		if !exists {
+			t.Fatalf("local_image_url field missing from log JSON: %#v", log)
+		}
+		got, ok := value.(string)
+		if !ok || got != want {
+			t.Fatalf("local_image_url = %#v, want %q", value, want)
+		}
+		if _, exists := log["LocalImageURL"]; exists {
+			t.Fatalf("unexpected Go field name in log JSON: %#v", log)
+		}
+	}
+
+	logs := fetchLogs()
+	if len(logs) != 3 {
+		t.Fatalf("logs count = %d, want 3: %#v", len(logs), logs)
+	}
+	assertLocalImageURL(findLog(logs, "log_with_image"), "/images/img_log_active.png")
+	assertLocalImageURL(findLog(logs, "log_without_image"), "")
+	assertLocalImageURL(findLog(logs, "log_with_missing_image"), "")
+
+	if _, err := application.store.MarkImageDeleted(context.Background(), "img_log_active"); err != nil {
+		t.Fatalf("mark image deleted: %v", err)
+	}
+	logs = fetchLogs()
+	if len(logs) != 3 {
+		t.Fatalf("logs count after image deletion = %d, want 3: %#v", len(logs), logs)
+	}
+	assertLocalImageURL(findLog(logs, "log_with_image"), "")
+	assertLocalImageURL(findLog(logs, "log_without_image"), "")
+	assertLocalImageURL(findLog(logs, "log_with_missing_image"), "")
+}
+
 func TestMonitoringSummaryAuthAndStats(t *testing.T) {
 	application, handler := newTestApp(t)
 	requestJSON(t, handler, http.MethodGet, "/admin/api/monitoring/summary", nil, http.StatusUnauthorized, nil, nil)
@@ -330,6 +404,9 @@ func TestChatCompletionReturnsUpstreamImageURLWhenConfigured(t *testing.T) {
 	log := logs[0]
 	if !log.Success || log.DownstreamImageURL != imageURL || log.UpstreamImageURL != imageURL || log.ImageReturnMode != config.ImageReturnModeUpstreamURL || log.ImageRecordID == "" {
 		t.Fatalf("unexpected upstream mode log: %#v", log)
+	}
+	if !strings.HasPrefix(log.LocalImageURL, "http://nimbus.test/images/") || log.LocalImageURL == imageURL {
+		t.Fatalf("upstream mode log should expose a distinct local archive URL: %#v", log)
 	}
 }
 

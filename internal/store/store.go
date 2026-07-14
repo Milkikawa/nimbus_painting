@@ -345,7 +345,7 @@ func (s *Store) InsertRequestLog(ctx context.Context, log model.RequestLog) erro
 }
 
 func (s *Store) ListRequestLogs(ctx context.Context, limit int) ([]model.RequestLog, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,created_at,model,model_index,raw_prompt,final_prompt,negative_prompt,width,height,steps,cfg,seed,success,error_message,upstream_status,COALESCE(upstream_endpoint,''),COALESCE(upstream_request_body,''),COALESCE(upstream_response_body,''),COALESCE(upstream_image_url,''),COALESCE(upstream_image_id,''),COALESCE(upstream_model_name,''),COALESCE(points_used,0),COALESCE(remaining_points,0),COALESCE(downstream_image_url,''),COALESCE(image_return_mode,''),COALESCE(image_save_error,''),image_record_id FROM request_logs ORDER BY created_at DESC LIMIT ?`, limit)
+	rows, err := s.db.QueryContext(ctx, `SELECT rl.id,rl.created_at,rl.model,rl.model_index,rl.raw_prompt,rl.final_prompt,rl.negative_prompt,rl.width,rl.height,rl.steps,rl.cfg,rl.seed,rl.success,rl.error_message,rl.upstream_status,COALESCE(rl.upstream_endpoint,''),COALESCE(rl.upstream_request_body,''),COALESCE(rl.upstream_response_body,''),COALESCE(rl.upstream_image_url,''),COALESCE(rl.upstream_image_id,''),COALESCE(rl.upstream_model_name,''),COALESCE(rl.points_used,0),COALESCE(rl.remaining_points,0),COALESCE(rl.downstream_image_url,''),COALESCE(rl.image_return_mode,''),COALESCE(rl.image_save_error,''),COALESCE(rl.image_record_id,''),CASE WHEN ir.id IS NOT NULL AND COALESCE(ir.deleted_at,'') = '' THEN COALESCE(ir.public_url,'') ELSE '' END FROM request_logs AS rl LEFT JOIN image_records AS ir ON ir.id = rl.image_record_id ORDER BY rl.created_at DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -355,7 +355,7 @@ func (s *Store) ListRequestLogs(ctx context.Context, limit int) ([]model.Request
 		var item model.RequestLog
 		var created string
 		var success int
-		if err := rows.Scan(&item.ID, &created, &item.Model, &item.ModelIndex, &item.RawPrompt, &item.FinalPrompt, &item.NegativePrompt, &item.Width, &item.Height, &item.Steps, &item.CFG, &item.Seed, &success, &item.ErrorMessage, &item.UpstreamStatus, &item.UpstreamEndpoint, &item.UpstreamRequestBody, &item.UpstreamResponseBody, &item.UpstreamImageURL, &item.UpstreamImageID, &item.UpstreamModelName, &item.PointsUsed, &item.RemainingPoints, &item.DownstreamImageURL, &item.ImageReturnMode, &item.ImageSaveError, &item.ImageRecordID); err != nil {
+		if err := rows.Scan(&item.ID, &created, &item.Model, &item.ModelIndex, &item.RawPrompt, &item.FinalPrompt, &item.NegativePrompt, &item.Width, &item.Height, &item.Steps, &item.CFG, &item.Seed, &success, &item.ErrorMessage, &item.UpstreamStatus, &item.UpstreamEndpoint, &item.UpstreamRequestBody, &item.UpstreamResponseBody, &item.UpstreamImageURL, &item.UpstreamImageID, &item.UpstreamModelName, &item.PointsUsed, &item.RemainingPoints, &item.DownstreamImageURL, &item.ImageReturnMode, &item.ImageSaveError, &item.ImageRecordID, &item.LocalImageURL); err != nil {
 			return nil, err
 		}
 		item.CreatedAt = parseTime(created)
