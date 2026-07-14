@@ -15,7 +15,10 @@ import (
 	"nimbus-painting/internal/store"
 )
 
-const maxImageDownloadAttempts = 3
+const (
+	maxImageDownloadAttempts = 3
+	maxImageSize             = int64(64 << 20)
+)
 
 var errImageTooLarge = errors.New("downloaded image exceeds 64 MiB limit")
 
@@ -77,23 +80,38 @@ func saveOnce(ctx context.Context, baseDir, publicBaseURL, imageURL string, pars
 		return model.ImageRecord{}, err
 	}
 	localPath := filepath.Join(dir, filename)
-	out, err := os.Create(localPath)
+	temp, err := os.CreateTemp(dir, "."+filename+".*.tmp")
 	if err != nil {
 		return model.ImageRecord{}, err
 	}
-	defer out.Close()
-	limited := io.LimitReader(resp.Body, (64<<20)+1)
-	written, err := io.Copy(out, limited)
-	if err != nil {
-		_ = out.Close()
-		_ = os.Remove(localPath)
+	tempPath := temp.Name()
+	closed := false
+	cleanup := true
+	defer func() {
+		if !closed {
+			_ = temp.Close()
+		}
+		if cleanup {
+			_ = os.Remove(tempPath)
+		}
+	}()
+	if err := temp.Chmod(0o644); err != nil {
 		return model.ImageRecord{}, err
 	}
-	if written > 64<<20 {
-		_ = out.Close()
-		_ = os.Remove(localPath)
-		return model.ImageRecord{}, errImageTooLarge
+	if err := copyImageWithLimit(temp, resp.Body, maxImageSize); err != nil {
+		return model.ImageRecord{}, err
 	}
+	if err := temp.Close(); err != nil {
+		return model.ImageRecord{}, err
+	}
+	closed = true
+	if err := ctx.Err(); err != nil {
+		return model.ImageRecord{}, err
+	}
+	if err := os.Rename(tempPath, localPath); err != nil {
+		return model.ImageRecord{}, err
+	}
+	cleanup = false
 
 	relativeURL := "/images/" + day + "/" + filename
 	publicURL := strings.TrimRight(publicBaseURL, "/") + relativeURL
@@ -107,6 +125,14 @@ func saveOnce(ctx context.Context, baseDir, publicBaseURL, imageURL string, pars
 		ModelIndex: parsed.ModelIndex, Seed: parsed.Seed, Width: parsed.Width, Height: parsed.Height,
 		Prompt: parsed.FinalPrompt, NegativePrompt: parsed.NegativePrompt,
 	}, nil
+}
+
+func copyImageWithLimit(dst io.Writer, src io.Reader, maxSize int64) error {
+	written, err := io.Copy(dst, io.LimitReader(src, maxSize+1))
+	if written > maxSize {
+		return errImageTooLarge
+	}
+	return err
 }
 
 func imageDownloadBackoff(attempt int) time.Duration {

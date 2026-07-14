@@ -56,6 +56,7 @@ type RequestLog struct {
 	ImageReturnMode      string    `json:"image_return_mode"`
 	ImageSaveError       string    `json:"image_save_error"`
 	ImageRecordID        string    `json:"image_record_id"`
+	LocalImageURL        string    `json:"local_image_url"`
 }
 
 type ImageRecord struct {
