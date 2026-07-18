@@ -1,5 +1,6 @@
 import { api, asList, escapeHTML, fmtDate, safeURL } from "../api.js";
 import { writeClipboardText } from "../clipboard.js";
+import { ImageLightbox } from "../components/image-lightbox.js";
 
 let activeLogs = [];
 let activeIndex = -1;
@@ -76,7 +77,7 @@ export const logsPage = {
 
     currentPage = page;
     currentRoot = root;
-    createLightboxPortal(page);
+    page.lightbox = new ImageLightbox({ ariaLabel: "本地归档图片预览" });
 
     page.reloadButton?.addEventListener("click", () => {
       void loadLogs(page, { initial: false }).catch((error) => {
@@ -113,7 +114,8 @@ function cleanupCurrentPage() {
     page.loadSequence = 0;
     blurFocusWithin(page.root);
     closeDrawer(page, { restoreFocus: false, clearContent: true });
-    destroyLightboxPortal(page);
+    page.lightbox?.destroy();
+    page.lightbox = null;
     page.root?.classList.remove("logs-page-root");
     page.marker?.remove();
 
@@ -245,7 +247,7 @@ function openDrawer(page, idx, trigger) {
   const log = activeLogs[idx];
   if (!log) return;
 
-  closeLightbox(page, { restoreFocus: false });
+  page.lightbox?.close({ restoreFocus: false });
 
   const { detailPanel, detailContent, listPanel } = page;
   if (
@@ -394,7 +396,7 @@ function openDrawer(page, idx, trigger) {
 
     button.addEventListener("click", () => {
       if (isCurrentPage(page) && button.dataset.localImageReady === "true")
-        openLightbox(page, button);
+        openLocalImageLightbox(page, button);
     });
 
     if (!image) {
@@ -420,7 +422,7 @@ function openDrawer(page, idx, trigger) {
 function closeDrawer(page, { restoreFocus = true, clearContent = true } = {}) {
   if (!page) return;
 
-  closeLightbox(page, { restoreFocus: false });
+  page.lightbox?.close({ restoreFocus: false });
   const { detailPanel, detailContent, listPanel } = page;
   const trigger = page.drawerTrigger;
   const focusInDrawer = detailPanel?.contains(document.activeElement);
@@ -503,56 +505,7 @@ function renderUpstreamImageLink(value) {
   >上游原图</a>`;
 }
 
-function createLightboxPortal(page) {
-  const overlay = document.createElement("div");
-  overlay.className = "log-image-lightbox hidden";
-  overlay.setAttribute("role", "dialog");
-  overlay.setAttribute("aria-modal", "true");
-  overlay.setAttribute("aria-hidden", "true");
-  overlay.setAttribute("aria-label", "本地归档图片预览");
-
-  const panel = document.createElement("div");
-  panel.className = "log-image-lightbox-panel";
-
-  const closeButton = document.createElement("button");
-  closeButton.type = "button";
-  closeButton.className = "button-secondary log-image-lightbox-close";
-  closeButton.textContent = "关闭";
-
-  const imageHost = document.createElement("div");
-  imageHost.className = "log-image-lightbox-host";
-
-  panel.append(closeButton, imageHost);
-  overlay.append(panel);
-  document.body.append(overlay);
-
-  page.lightbox = {
-    overlay,
-    panel,
-    closeButton,
-    imageHost,
-    image: null,
-    trigger: null,
-    generation: 0,
-  };
-
-  closeButton.addEventListener("click", () => closeLightbox(page));
-  overlay.addEventListener("click", (event) => {
-    if (event.target === overlay) closeLightbox(page);
-  });
-}
-
-function destroyLightboxPortal(page) {
-  const lightbox = page?.lightbox;
-  if (!lightbox) return;
-
-  closeLightbox(page, { restoreFocus: false });
-  blurFocusWithin(lightbox.overlay);
-  lightbox.overlay.remove();
-  page.lightbox = null;
-}
-
-function openLightbox(page, button) {
+function openLocalImageLightbox(page, button) {
   if (
     !isCurrentPage(page) ||
     !button?.isConnected ||
@@ -564,94 +517,29 @@ function openLightbox(page, button) {
   const localURL = safeURL(button.dataset.localImage);
   if (!localURL) {
     moveFocusToDrawerClose(page);
-    closeLightbox(page, { restoreFocus: false });
+    page.lightbox?.close({ restoreFocus: false });
     setLocalThumbnailUnavailable(page, button);
     return;
   }
 
-  const lightbox = page.lightbox;
-  if (!lightbox?.overlay.isConnected) return;
-
-  closeLightbox(page, { restoreFocus: false });
-  const generation = ++lightbox.generation;
-  const image = document.createElement("img");
-  image.className = "log-image-lightbox-image";
-  image.alt = "本地归档生成图片大图";
-
-  lightbox.trigger = button;
-  lightbox.image = image;
-  lightbox.imageHost.replaceChildren(image);
-
-  image.addEventListener("error", () => {
-    if (
-      !isCurrentPage(page) ||
-      generation !== lightbox.generation ||
-      lightbox.image !== image ||
-      lightbox.trigger !== button ||
-      !image.isConnected ||
-      !button.isConnected
-    )
-      return;
-
-    moveFocusToDrawerClose(page);
-    closeLightbox(page, { restoreFocus: false });
-    setLocalThumbnailUnavailable(page, button);
+  page.lightbox?.open({
+    src: localURL,
+    trigger: button,
+    alt: "本地归档生成图片大图",
+    onError: ({ trigger }) => {
+      if (!isCurrentPage(page) || !trigger?.isConnected) return;
+      moveFocusToDrawerClose(page);
+      setLocalThumbnailUnavailable(page, trigger);
+    },
   });
-
-  lightbox.overlay.setAttribute("aria-hidden", "false");
-  lightbox.overlay.classList.remove("hidden");
-  lightbox.closeButton.focus();
-  image.src = localURL;
-}
-
-function closeLightbox(page, { restoreFocus = true } = {}) {
-  const lightbox = page?.lightbox;
-  if (!lightbox) return;
-
-  const trigger = lightbox.trigger;
-  const image = lightbox.image;
-  lightbox.generation += 1;
-  lightbox.trigger = null;
-  lightbox.image = null;
-
-  if (restoreFocus && trigger?.isConnected && !trigger.disabled) {
-    trigger.focus();
-  } else if (
-    restoreFocus &&
-    lightbox.overlay.contains(document.activeElement)
-  ) {
-    moveFocusToDrawerClose(page);
-  } else if (lightbox.overlay.contains(document.activeElement)) {
-    document.activeElement.blur();
-  }
-
-  lightbox.overlay.setAttribute("aria-hidden", "true");
-  lightbox.overlay.classList.add("hidden");
-
-  if (image) {
-    image.removeAttribute("src");
-    image.remove();
-  }
-  lightbox.imageHost.replaceChildren();
 }
 
 function handlePageKeydown(event) {
+  if (event.defaultPrevented) return;
+
   const page = currentPage;
   if (!isCurrentPage(page)) return;
-
-  const lightbox = page.lightbox;
-  if (lightbox && !lightbox.overlay.classList.contains("hidden")) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      closeLightbox(page);
-      return;
-    }
-    if (event.key === "Tab") {
-      trapFocus(event, lightbox.overlay, lightbox.closeButton);
-    }
-    return;
-  }
-
+  if (page.lightbox?.isOpen) return;
   if (page.detailPanel?.classList.contains("hidden")) return;
 
   if (event.key === "Escape") {
@@ -702,11 +590,11 @@ function isMobileDrawerViewport() {
 
 function handleLocalThumbnailError(page, button) {
   if (!isCurrentPage(page) || !button?.isConnected) return;
-  const isLightboxTrigger = page.lightbox?.trigger === button;
+  const isLightboxTrigger = page.lightbox?.isTrigger(button) === true;
   if (document.activeElement === button || isLightboxTrigger) {
     moveFocusToDrawerClose(page);
   }
-  if (isLightboxTrigger) closeLightbox(page, { restoreFocus: false });
+  if (isLightboxTrigger) page.lightbox.close({ restoreFocus: false });
   setLocalThumbnailUnavailable(page, button);
 }
 
