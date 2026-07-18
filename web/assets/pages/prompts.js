@@ -1,4 +1,5 @@
 import { api, asList, escapeHTML } from '../api.js';
+import { writeClipboardText } from '../clipboard.js';
 
 export const promptsPage = {
   title: '提示词组',
@@ -124,10 +125,14 @@ async function loadGroups(ctx) {
   });
 
   document.querySelectorAll('[data-copy-content]').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const group = list.find(item => item.id === btn.dataset.copyContent);
       if (group) {
-        navigator.clipboard.writeText(group.content).then(() => ctx.toast('已复制到剪贴板', 'success')).catch(() => {});
+        const copied = await writeClipboardText(group.content);
+        ctx.toast(
+          copied ? '已复制到剪贴板' : '复制失败，请手动复制',
+          copied ? 'success' : 'error'
+        );
       }
     });
   });

@@ -1,4 +1,5 @@
 import { api, asList, escapeHTML, fmtDate, safeURL } from "../api.js";
+import { writeClipboardText } from "../clipboard.js";
 
 let activeLogs = [];
 let activeIndex = -1;
@@ -694,24 +695,6 @@ function isMobileDrawerViewport() {
   if (typeof window.matchMedia !== "function") return false;
   try {
     return Boolean(window.matchMedia("(max-width: 980px)")?.matches);
-  } catch {
-    return false;
-  }
-}
-
-async function writeClipboardText(text) {
-  let writeText;
-  try {
-    const clipboard = navigator.clipboard;
-    writeText = clipboard?.writeText?.bind(clipboard);
-  } catch {
-    return false;
-  }
-  if (!writeText) return false;
-
-  try {
-    await Promise.resolve().then(() => writeText(String(text ?? "")));
-    return true;
   } catch {
     return false;
   }

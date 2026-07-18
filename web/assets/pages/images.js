@@ -1,4 +1,5 @@
 import { api, asList, escapeHTML, fmtDate, safeURL } from "../api.js";
+import { writeClipboardText } from "../clipboard.js";
 
 export const imagesPage = {
   title: "图片管理",
@@ -47,11 +48,13 @@ async function loadImages(ctx) {
 
     // Bind copy URL events
     root.querySelectorAll("[data-copy-url]").forEach(btn =>
-      btn.addEventListener("click", () => {
-        const url = btn.dataset.copyUrl;
-        if (url) {
-          navigator.clipboard.writeText(url).then(() => ctx.toast("链接已复制", "success")).catch(() => {});
-        }
+      btn.addEventListener("click", async () => {
+        const url = safeURL(btn.dataset.copyUrl);
+        const copied = url ? await writeClipboardText(url) : false;
+        ctx.toast(
+          copied ? "链接已复制" : "复制失败，请手动复制链接",
+          copied ? "success" : "error"
+        );
       })
     );
   } finally {
