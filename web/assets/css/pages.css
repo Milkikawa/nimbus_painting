@@ -1819,23 +1819,61 @@
   border-bottom: 0;
 }
 
-.model-input {
+.models-table .model-input {
   width: 100%;
   min-width: 120px;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--color-surface-subtle);
+  color: var(--text-main);
+  outline: none;
+  transition: background-color var(--transition-fast),
+    border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
-.model-index,
-.model-force-steps {
+.models-table .model-input::placeholder {
+  color: var(--text-tertiary);
+  opacity: 1;
+}
+
+.models-table .model-input:hover {
+  border-color: var(--border-strong);
+}
+
+.models-table .model-input:focus,
+.models-table .model-input:focus-visible {
+  border-color: var(--color-primary);
+  background: var(--color-surface);
+  box-shadow: 0 0 0 3px var(--color-primary-soft);
+}
+
+.models-table select.model-input {
+  cursor: pointer;
+}
+
+.models-table .model-index,
+.models-table .model-force-steps {
   min-width: 88px;
 }
 
-.model-check-cell {
+.models-table .model-check-cell {
   text-align: center;
 }
 
-.model-check-cell input[type="checkbox"] {
+.models-table .model-check-cell input[type="checkbox"] {
   width: 18px;
   height: 18px;
+  margin: 0;
+  vertical-align: middle;
+  accent-color: var(--color-primary);
+  cursor: pointer;
+}
+
+.models-table .model-check-cell input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
 }
 
 @media (max-width: 768px) {
